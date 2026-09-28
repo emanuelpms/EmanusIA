@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="pt-BR">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>EmanusIA</title>
+<style>
+:root{--bg:#0b1220;--side:#0f1729;--card:#131c2e;--fg:#e6ecf5;--mut:#8a97ad;--line:#22304a;--acc:#4f8cff;--ok:#22c7a9;--warn:#ffb020;--bad:#ff6b6b}
+@media(prefers-color-scheme:light){:root{--bg:#f4f6fb;--side:#fff;--card:#fff;--fg:#0f172a;--mut:#64748b;--line:#e2e8f0}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,"Segoe UI",sans-serif;display:flex;height:100vh}
+nav{width:220px;background:var(--side);border-right:1px solid var(--line);padding:16px 10px;display:flex;flex-direction:column;gap:4px;flex-shrink:0}
+nav h1{font-size:19px;margin:0 8px 14px}nav button{all:unset;cursor:pointer;padding:9px 12px;border-radius:9px;color:var(--mut)}
+nav button:hover{background:var(--line)}nav button.on{background:var(--acc);color:#fff}nav .sp{flex:1}
+nav .who{font-size:12px;color:var(--mut);padding:6px 10px}
+main{flex:1;overflow:auto;padding:24px 28px}h2{margin:0 0 16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:12px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
+button.b,a.b{all:unset;cursor:pointer;background:var(--acc);color:#fff;padding:7px 14px;border-radius:9px;font-size:14px;display:inline-block}
+button.b.sec{background:var(--line);color:var(--fg)}button.b.bad{background:var(--bad)}button.b:disabled{opacity:.5;cursor:default}
+input,select,textarea{background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:9px;padding:8px 10px;font:inherit;width:100%}
+textarea{font-family:ui-monospace,Consolas,monospace;font-size:13px}label{display:block;margin:10px 0 4px;color:var(--mut);font-size:13px}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.mut{color:var(--mut)}.small{font-size:13px}
+table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:8px;border-bottom:1px solid var(--line);font-size:14px}
+.tag{font-size:12px;padding:2px 8px;border-radius:99px;background:var(--line)}.tag.done{background:var(--ok);color:#00201a}
+.tag.error{background:var(--bad);color:#fff}.tag.running,.tag.queued{background:var(--acc);color:#fff}.tag.waiting_approval{background:var(--warn);color:#2b1c00}
+#chat{display:flex;flex-direction:column;height:calc(100vh - 48px)}#msgs{flex:1;overflow:auto;padding-bottom:10px}
+.m{max-width:80%;padding:10px 14px;border-radius:14px;margin:8px 0;white-space:pre-wrap;word-break:break-word}
+.m.u{background:var(--acc);color:#fff;margin-left:auto}.m.a{background:var(--card);border:1px solid var(--line)}
+.chip{display:inline-block;font-size:12px;background:var(--line);border-radius:8px;padding:1px 8px;margin:2px 3px 2px 0}
+.modal{position:fixed;inset:0;background:#0008;display:none;align-items:center;justify-content:center;z-index:9}.modal.show{display:flex}
+.modal>div{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px;width:min(560px,92vw);max-height:90vh;overflow:auto}
+pre{background:var(--bg);border:1px solid var(--line);padding:10px;border-radius:9px;white-space:pre-wrap;font-size:12.5px;max-height:260px;overflow:auto}
+#rec{display:none;background:var(--warn);color:#2b1c00;padding:10px 14px;border-radius:12px;margin-bottom:12px}
+@media(max-width:700px){nav{width:64px}nav button{font-size:0}nav button::first-letter{font-size:18px}nav h1,.who{display:none}}
+</style>
+<body>
+<nav id="nav"></nav>
+<main id="main"></main>
+
+<div class="modal" id="modal"><div id="mbody"></div></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+async function api(path, method='GET', body) {
+  const r = await fetch(path, {method, headers: body ? {'Content-Type':'application/json'} : {}, body: body ? JSON.stringify(body) : undefined});
+  if (r.status === 401) { showLogin(); throw new Error('login'); }
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail || j));
+  return j;
+}
+const toast = m => alert(m);
+let ME = null, TAB = 'chat', HISTORY = [], ACTIVE = null;
+const TABS = [['chat','💬 Chat'],['flows','⚙️ Automações'],['jobs','📋 Tarefas'],['sched','⏰ Agendamentos'],['files','📁 Arquivos'],['admin','👥 Admin'],['cfg','🔧 Ajustes']];
+
+function modal(html) { $('#mbody').innerHTML = html; $('#modal').classList.add('show'); }
+function closeModal() { $('#modal').classList.remove('show'); }
+$('#modal').addEventListener('click', e => { if (e.target.id === 'modal') closeModal(); });
+
+function showLogin() {
+  modal(`<h2>Entrar</h2><label>Usuário</label><input id="lu"><label>Senha</label><input id="lp" type="password">
+  <p><button class="b" onclick="doLogin()">Entrar</button></p>`);
+  $('#lp').addEventListener('keydown', e => e.key === 'Enter' && doLogin());
+}
+async function doLogin() {
+  try { await api('/api/login','POST',{user:$('#lu').value,password:$('#lp').value}); closeModal(); boot(); }
+  catch (e) { toast(e.message); }
+}
+
+async function boot() {
+  const me = await fetch('/api/me').then(r => r.json());
+  if (!me.user) return showLogin();
+  ME = me;
+  const u = me.user;
+  $('#nav').innerHTML = '<h1>🤖 EmanusIA</h1>' + TABS.filter(([k]) => k !== 'admin' || u.role === 'admin')
+    .map(([k,l]) => `<button data-t="${k}" class="${k===TAB?'on':''}" onclick="go('${k}')">${l}</button>`).join('')
+    + `<div class="sp"></div><div class="who">${esc(u.name)} · ${esc(u.role)}</div>`
+    + (me.auth_enabled ? '<button onclick="logout()">Sair</button>' : '');
+  go(TAB);
+}
+async function logout() { await api('/api/logout','POST'); location.reload(); }
+function go(t) {
+  TAB = t;
+  document.querySelectorAll('nav button[data-t]').forEach(b => b.classList.toggle('on', b.dataset.t === t));
+  ({chat: viewChat, flows: viewFlows, jobs: viewJobs, sched: viewSched, files: viewFiles, admin: viewAdmin, cfg: viewCfg})[t]();
+}
+const readonly = () => ME.user.role === 'viewer';
+
+/* ---------- job polling (aprovações, progresso) ---------- */
+async function follow(id, onUpdate) {
+  ACTIVE = id;
+  while (true) {
+    const j = await api('/api/jobs/' + id);
+    onUpdate(j);
+    if (j.status === 'waiting_approval') askApproval(j);
+    if (j.status === 'done' || j.status === 'error') return j;
+    await new Promise(r => setTimeout(r, 800));
+  }
+}
+let approvalShown = null;
+function askApproval(j) {
+  const key = j.id + JSON.stringify(j.pending);
+  if (approvalShown === key) return; approvalShown = key;
+  modal(`<h2>⚠️ Autorizar ação?</h2><p>O robô quer executar:</p><pre>${esc(j.pending.tool)}\n${esc(JSON.stringify(j.pending.args, null, 2))}</pre>
+  <div class="row"><button class="b" onclick="answer('${j.id}',true)">Autorizar</button>
+  <button class="b bad" onclick="answer('${j.id}',false)">Negar</button></div>`);
+}
+async function answer(id, ok) { closeModal(); approvalShown = null; await api(`/api/jobs/${id}/approve`, 'POST', {ok}); }
+
+/* ---------- Chat ---------- */
+function viewChat() {
+  $('#main').innerHTML = `<div id="chat"><div id="msgs"></div>
+  <div class="row"><textarea id="inp" rows="2" placeholder="Peça uma tarefa: ex. 'Leia vendas.xlsx e gere um dashboard'" ${readonly()?'disabled':''}></textarea>
+  <button class="b" id="send" onclick="send()" ${readonly()?'disabled':''}>Enviar</button></div></div>`;
+  $('#inp').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
+  HISTORY.forEach(m => bubble(m.role === 'user' ? 'u' : 'a', m.content));
+  if (!HISTORY.length) bubble('a', 'Olá! Sou seu funcionário-robô. Posso automatizar sites, gerar Excel/Power BI/dashboards, operar o SAP e outros programas. O que fazemos?');
+}
+function bubble(cls, text) { const d = document.createElement('div'); d.className = 'm ' + cls; d.textContent = text; $('#msgs').append(d); $('#msgs').scrollTop = 1e9; return d; }
+async function send() {
+  const inp = $('#inp'), task = inp.value.trim(); if (!task) return;
+  inp.value = ''; bubble('u', task); $('#send').disabled = true;
+  const box = bubble('a', '⏳ Trabalhando...');
+  try {
+    const j0 = await api('/api/jobs/agent', 'POST', {task, history: HISTORY});
+    const j = await follow(j0.id, j => {
+      const calls = j.events.filter(e => e.kind === 'tool_call').map(e => '→ ' + e.name).join('  ');
+      box.textContent = (j.status === 'waiting_approval' ? '⚠️ Aguardando sua autorização\n' : '⏳ Trabalhando...\n') + calls;
+    });
+    const ans = typeof j.result === 'string' ? j.result : JSON.stringify(j.result);
+    box.textContent = (j.status === 'error' ? '❌ ' : '') + ans;
+    HISTORY.push({role:'user', content: task}, {role:'assistant', content: ans});
+  } catch (e) { box.textContent = '❌ ' + e.message; }
+  $('#send').disabled = false;
+}
+
+/* ---------- Automações ---------- */
+async function viewFlows() {
+  const wfs = await api('/api/workflows');
+  $('#main').innerHTML = `<h2>Automações</h2><div id="rec"></div>
+  ${readonly() ? '' : `<div class="card"><b>🎬 Gravar nova automação</b>
+   <p class="mut small">Abre um navegador: use o site normalmente e o robô grava os passos. Senhas não são gravadas (viram variáveis de ambiente).</p>
+   <div class="row"><input id="ru" placeholder="https://site-da-empresa.com" style="flex:2"><input id="rn" placeholder="nome-da-automacao" style="flex:1">
+   <button class="b" onclick="startRec()">Gravar</button><button class="b sec" onclick="editFlow('')">Novo em YAML</button></div></div>`}
+  <div class="grid">${wfs.map(w => `<div class="card"><b>${esc(w.name)}</b> <span class="tag">${w.steps} passos</span>
+    <div class="mut small" style="margin:6px 0">${esc(w.description) || '—'}</div>
+    <div class="row"><button class="b" ${w.allowed && !readonly() ? '' : 'disabled'} onclick='runFlow(${JSON.stringify(w.name)}, ${JSON.stringify(w.params)})'>▶ Executar</button>
+    <button class="b sec" onclick='editFlow(${JSON.stringify(w.name)})'>${readonly() ? 'Ver' : 'Editar'}</button>
+    <button class="b sec" ${readonly() ? 'disabled' : ''} onclick='schedFlow(${JSON.stringify(w.name)})'>⏰</button></div></div>`).join('') || '<p class="mut">Nenhuma automação ainda.</p>'}</div>`;
+}
+async function startRec() {
+  try {
+    const j = await api('/api/jobs/record', 'POST', {url: $('#ru').value, name: $('#rn').value});
+    const r = $('#rec'); r.style.display = 'block';
+    r.innerHTML = `🔴 Gravando <b>${esc(j.title)}</b> — use o navegador que abriu. <button class="b" onclick="stopRec('${j.id}')">Parar e salvar</button>`;
+    follow(j.id, () => {}).then(x => { r.style.display = 'none'; toast(x.status === 'done' ? 'Automação salva!' : 'Erro: ' + x.result); viewFlows(); });
+  } catch (e) { toast(e.message); }
+}
+async function stopRec(id) { await api(`/api/jobs/${id}/stop`, 'POST'); }
+function runFlow(name, params) {
+  const keys = Object.keys(params || {});
+  modal(`<h2>Executar ${esc(name)}</h2>${keys.map(k => `<label>${esc(k)}</label><input data-p="${esc(k)}" value="${esc(params[k])}">`).join('')}
+  <label>Ações de risco (enviar, pagar, gravar no SAP...)</label>
+  <select id="risk"><option value="">Perguntar a cada ação</option><option value="true">Autorizar todas deste workflow</option><option value="false">Negar todas</option></select>
+  <p><button class="b" onclick='doRun(${JSON.stringify(name)})'>Executar</button></p>`);
+}
+async function doRun(name) {
+  const params = {}; document.querySelectorAll('[data-p]').forEach(i => params[i.dataset.p] = i.value);
+  const r = $('#risk').value; closeModal();
+  try { const j = await api('/api/jobs/workflow', 'POST', {name, params, approve_risky: r === '' ? null : r === 'true'}); go('jobs'); follow(j.id, () => {}); }
+  catch (e) { toast(e.message); }
+}
+async function editFlow(name) {
+  const y = name ? (await api('/api/workflows/' + name)).yaml : 'name: minha-automacao\ndescription: \nparams: {}\nsteps:\n  - tool: web_open\n    args: {url: "https://exemplo.com"}\n';
+  modal(`<h2>${name ? esc(name) : 'Nova automação'}</h2>
+  ${name ? '' : '<label>Nome do arquivo</label><input id="wn" placeholder="minha-automacao">'}
+  <label>YAML (ferramentas: veja a aba Ajustes)</label><textarea id="wy" rows="16">${esc(y)}</textarea>
+  <div class="row" style="margin-top:12px"><button class="b" ${readonly()?'disabled':''} onclick='saveFlow(${JSON.stringify(name)})'>Salvar</button>
+  ${name && !readonly() ? `<button class="b bad" onclick='delFlow(${JSON.stringify(name)})'>Excluir</button>` : ''}</div>`);
+}
+async function saveFlow(name) {
+  try { await api('/api/workflows/' + (name || $('#wn').value), 'PUT', {yaml: $('#wy').value}); closeModal(); viewFlows(); }
+  catch (e) { toast(e.message); }
+}
+async function delFlow(name) { if (confirm('Excluir ' + name + '?')) { await api('/api/workflows/' + name, 'DELETE'); closeModal(); viewFlows(); } }
+
+/* ---------- Agendamentos ---------- */
+function schedFlow(name) {
+  modal(`<h2>Agendar ${esc(name)}</h2><label>Tipo</label>
+  <select id="st" onchange="document.getElementById('sd').style.display=this.value=='d'?'block':'none'"><option value="e">A cada N minutos</option><option value="d">Diário em horário fixo</option></select>
+  <label>Minutos (intervalo)</label><input id="sm" type="number" value="60" min="1">
+  <div id="sd" style="display:none"><label>Horário</label><input id="sh" type="time" value="08:00">
+  <label>Dias</label><div class="row">${['Seg','Ter','Qua','Qui','Sex','Sáb','Dom'].map((d,i) => `<label style="margin:0"><input type="checkbox" class="day" value="${i}" ${i<5?'checked':''} style="width:auto"> ${d}</label>`).join('')}</div></div>
+  ${ME.user.role === 'admin' ? '<label><input type="checkbox" id="su" style="width:auto"> Executar sem supervisão (autoriza ações de risco automaticamente)</label>' : '<p class="mut small">Ações de risco serão negadas nas execuções agendadas.</p>'}
+  <p><button class="b" onclick='doSched(${JSON.stringify(name)})'>Agendar</button></p>`);
+}
+async function doSched(name) {
+  const when = $('#st').value === 'e' ? {every_minutes: +$('#sm').value}
+    : {daily_at: $('#sh').value, days: [...document.querySelectorAll('.day:checked')].map(c => +c.value)};
+  try { await api('/api/schedules', 'POST', {workflow: name, when, unattended: !!($('#su') && $('#su').checked)}); closeModal(); go('sched'); }
+  catch (e) { toast(e.message); }
+}
+async function viewSched() {
+  const s = await api('/api/schedules');
+  $('#main').innerHTML = `<h2>Agendamentos</h2><div class="card"><table><tr><th>Automação</th><th>Quando</th><th>Próxima</th><th>Último</th><th>Dono</th><th></th></tr>
+  ${s.map(i => `<tr><td>${esc(i.workflow)}${i.unattended ? ' <span class="tag">sem supervisão</span>' : ''}</td>
+  <td>${esc(i.when.every_minutes ? 'a cada ' + i.when.every_minutes + ' min' : i.when.daily_at)}</td><td>${esc(i.next_run.replace('T',' '))}</td>
+  <td class="small">${esc(i.last_status || '—')}</td><td>${esc(i.owner)}</td>
+  <td class="row"><button class="b sec" onclick="togSched('${i.id}',${!i.enabled})">${i.enabled ? 'Pausar' : 'Ativar'}</button><button class="b bad" onclick="delSched('${i.id}')">✕</button></td></tr>`).join('') || '<tr><td colspan=6 class="mut">Nada agendado. Agende pela aba Automações (⏰).</td></tr>'}</table></div>`;
+}
+async function togSched(id, en) { await api(`/api/schedules/${id}/toggle`, 'POST', {enabled: en}); viewSched(); }
+async function delSched(id) { await api('/api/schedules/' + id, 'DELETE'); viewSched(); }
+
+/* ---------- Tarefas ---------- */
+async function viewJobs() {
+  const js = await api('/api/jobs');
+  $('#main').innerHTML = `<h2>Tarefas</h2><div class="card"><table><tr><th>Quando</th><th>Tipo</th><th>Título</th><th>Usuário</th><th>Status</th></tr>
+  ${js.map(j => `<tr style="cursor:pointer" onclick="showJob('${j.id}')"><td class="small">${new Date(j.created*1000).toLocaleTimeString()}</td><td>${esc(j.kind)}</td><td>${esc(j.title)}</td><td>${esc(j.user)}</td><td><span class="tag ${j.status}">${esc(j.status)}</span></td></tr>`).join('') || '<tr><td class="mut">Sem tarefas nesta sessão.</td></tr>'}</table></div>`;
+}
+async function showJob(id) {
+  const j = await api('/api/jobs/' + id);
+  modal(`<h2>${esc(j.title)}</h2><span class="tag ${j.status}">${esc(j.status)}</span>
+  <label>Passos</label><pre>${esc(j.events.map(e => e.kind === 'tool_call' ? '→ ' + e.name + ' ' + JSON.stringify(e.args) : e.kind === 'tool_result' ? '   ← ' + JSON.stringify(e.result).slice(0, 300) : e.kind + ' ' + JSON.stringify(e)).join('\n') || '—')}</pre>
+  <label>Resultado</label><pre>${esc(typeof j.result === 'string' ? j.result : JSON.stringify(j.result, null, 2))}</pre>`);
+}
+
+/* ---------- Arquivos ---------- */
+async function viewFiles() {
+  const f = await api('/api/files');
+  $('#main').innerHTML = `<h2>Arquivos gerados</h2><div class="card"><table><tr><th>Arquivo</th><th>Tamanho</th><th>Modificado</th></tr>
+  ${f.map(x => `<tr><td><a href="/files/${x.path.split('/').map(encodeURIComponent).join('/')}" target="_blank" style="color:var(--acc)">${esc(x.path)}</a></td>
+  <td>${(x.size/1024).toFixed(1)} KB</td><td class="small">${new Date(x.mtime*1000).toLocaleString()}</td></tr>`).join('') || '<tr><td class="mut">Vazio.</td></tr>'}</table></div>`;
+}
+
+/* ---------- Admin ---------- */
+async function viewAdmin() {
+  const [us, au] = await Promise.all([api('/api/users'), api('/api/audit')]);
+  $('#main').innerHTML = `<h2>Usuários e auditoria</h2>
+  <div class="card"><b>Usuários</b> <span class="mut small">${ME.auth_enabled ? '' : '— nenhum usuário cadastrado: modo local sem login. Crie o primeiro (admin) para ativar o login.'}</span>
+  <table>${us.map(u => `<tr><td>${esc(u.name)}</td><td>${esc(u.role)}</td><td class="small">${u.tools ? 'ferramentas: ' + esc(u.tools.join(', ')) : 'todas as ferramentas'}</td>
+  <td><button class="b bad" onclick="delUser('${esc(u.name)}')">✕</button></td></tr>`).join('')}</table>
+  <div class="row" style="margin-top:10px"><input id="nu" placeholder="nome"><input id="np" type="password" placeholder="senha (8+)">
+  <select id="nr"><option>operator</option><option>admin</option><option>viewer</option></select>
+  <input id="nt" placeholder="ferramentas permitidas (opcional, separadas por vírgula)"><button class="b" onclick="addUser()">Criar</button></div></div>
+  <div class="card"><b>Auditoria (últimos 200)</b><table>${au.map(a => `<tr><td class="small">${esc(a.ts)}</td><td>${esc(a.user)}</td><td>${esc(a.action)}</td>
+  <td class="small">${esc(a.tool || a.workflow || a.task || a.name || '')}${a.ok === false ? ' ❌ ' + esc(a.error) : ''}</td></tr>`).join('')}</table></div>`;
+}
+async function addUser() {
+  const t = $('#nt').value.split(',').map(s => s.trim()).filter(Boolean);
+  try { await api('/api/users', 'POST', {name: $('#nu').value, password: $('#np').value, role: $('#nr').value, tools: t.length ? t : null});
+    toast('Usuário criado. O login passa a ser exigido.'); location.reload(); } catch (e) { toast(e.message); }
+}
+async function delUser(n) { if (confirm('Remover ' + n + '?')) { try { await api('/api/users/' + n, 'DELETE'); viewAdmin(); } catch (e) { toast(e.message); } } }
+
+/* ---------- Ajustes ---------- */
+async function viewCfg() {
+  const [c, tools] = await Promise.all([api('/api/config'), api('/api/tools')]);
+  const opts = (sel) => [...new Set([sel, ...c.installed_models])].map(m => `<option ${m === sel ? 'selected' : ''}>${esc(m)}</option>`).join('');
+  $('#main').innerHTML = `<h2>Ajustes</h2>
+  <div class="card"><b>Modelos (Ollama)</b>
+  ${c.installed_models.length ? '' : '<p class="small" style="color:var(--warn)">Ollama não respondeu. Instale em ollama.com e rode: <code>ollama pull qwen2.5:7b</code> e <code>ollama pull qwen2.5vl:3b</code></p>'}
+  <label>Modelo de raciocínio/ferramentas</label><select id="cm">${opts(c.settings.model)}</select>
+  <label>Modelo de visão</label><select id="cv">${opts(c.settings.vision_model)}</select>
+  <p><button class="b" ${ME.user.role === 'admin' ? '' : 'disabled'} onclick="saveCfg()">Salvar</button></p>
+  <p class="mut small">Workspace (onde o robô lê/escreve): ${esc(c.workspace)}</p></div>
+  <div class="card"><b>Ferramentas disponíveis</b> <span class="mut small">(⚠️ = pede autorização)</span>
+  <table>${tools.map(t => `<tr style="${t.allowed ? '' : 'opacity:.4'}"><td><code>${esc(t.name)}</code> ${t.risky ? '⚠️' : ''}</td><td class="small">${esc(t.description)}</td></tr>`).join('')}</table></div>`;
+}
+async function saveCfg() { try { await api('/api/settings', 'POST', {model: $('#cm').value, vision_model: $('#cv').value}); toast('Salvo.'); } catch (e) { toast(e.message); } }
+
+boot();
+</script>
+</html>

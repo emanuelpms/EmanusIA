@@ -10,7 +10,11 @@ dependencies = [
 
 [project.optional-dependencies]
 sap = ["pywin32; sys_platform == 'win32'"]
-dev = ["pytest"]
+desktop = ["pywinauto; sys_platform == 'win32'", "pyautogui", "pillow", "pywin32; sys_platform == 'win32'"]
+gui = ["pywebview"]
+sql = ["pyodbc"]
+all = ["emanusia[sap,desktop,gui,sql]"]
+dev = ["pytest", "httpx"]
 
 [project.scripts]
 emanusia = "emanusia.cli:main"
@@ -24,3 +28,6 @@ include = ["emanusia*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.setuptools.package-data]
+emanusia = ["static/*"]

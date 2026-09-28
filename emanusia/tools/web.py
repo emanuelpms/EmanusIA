@@ -1,6 +1,7 @@
 """Automação web via Playwright. Uma sessão de navegador persistente por processo.
 Login: use `web_fill_secret` (lê a senha de variável de ambiente; o LLM nunca a vê)."""
 import os
+import re
 
 from .. import config
 from .registry import tool
@@ -30,8 +31,15 @@ def web_open(url: str):
     return {"url": p.url, "title": p.title()}
 
 
-@tool("web_click", "Clica em um elemento (seletor CSS ou text=...).",
-      {"selector": {"type": "string"}}, ("selector",), risky=True)
+_DESTRUCTIVE = re.compile(r"excluir|deletar|apagar|remover|pagar|pagamento|enviar|confirmar|aprovar|"
+                          r"finalizar|submit|delete|remove|pay|send|approve|confirm|checkout|purchase",
+                          re.I)
+
+
+@tool("web_click", "Clica em um elemento (seletor CSS ou text=...). Cliques em botões que "
+      "excluem/pagam/enviam/aprovam exigem autorização.",
+      {"selector": {"type": "string"}}, ("selector",),
+      risky=lambda a: bool(_DESTRUCTIVE.search(a.get("selector", ""))))
 def web_click(selector: str):
     _get_page().click(selector)
     return "ok"

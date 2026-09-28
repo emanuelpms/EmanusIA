@@ -30,8 +30,18 @@ def main(argv=None):
     w = sub.add_parser("workflow", help="roda uma automação salva (sem LLM)")
     w.add_argument("name")
     w.add_argument("-p", "--param", action="append", default=[], help="chave=valor")
-    s = sub.add_parser("serve", help="API + interface web local")
+    s = sub.add_parser("serve", help="API + interface web local (sem abrir janela)")
     s.add_argument("--port", type=int, default=8765)
+    g = sub.add_parser("gui", help="abre a interface gráfica (janela nativa ou navegador)")
+    g.add_argument("--port", type=int, default=8765)
+    rec = sub.add_parser("record", help="grava uma automação web usando o navegador")
+    rec.add_argument("url")
+    rec.add_argument("name")
+    u = sub.add_parser("user", help="gerencia usuários (ativa login na GUI)")
+    u.add_argument("action", choices=["add", "list", "remove"])
+    u.add_argument("name", nargs="?")
+    u.add_argument("--role", default="operator", choices=["admin", "operator", "viewer"])
+    u.add_argument("--tools", help="whitelist de ferramentas, separadas por vírgula")
     sub.add_parser("tools", help="lista as ferramentas disponíveis")
     a = ap.parse_args(argv)
 
@@ -40,6 +50,28 @@ def main(argv=None):
         from .tools import registry
         for t in registry.all_tools():
             print(f"{'⚠️ ' if t.risky else '   '}{t.name:22} {t.description[:80]}")
+    elif a.cmd == "gui":
+        from .gui import launch
+        launch(a.port)
+    elif a.cmd == "record":
+        import threading
+        from .recorder import record
+        stop = threading.Event()
+        print("Gravando... use o navegador e feche a janela para salvar.")
+        record(a.url, a.name, stop)
+        print(f"Salvo em workflows/{a.name}.yaml")
+    elif a.cmd == "user":
+        from . import auth
+        import getpass
+        if a.action == "list":
+            for u_ in auth.list_users():
+                print(u_["name"], u_["role"])
+        elif a.action == "remove":
+            auth.remove_user(a.name)
+        else:
+            auth.add_user(a.name, getpass.getpass("Senha: "), a.role,
+                          a.tools.split(",") if a.tools else None)
+            print("Usuário criado. A GUI passa a exigir login.")
     elif a.cmd == "serve":
         import uvicorn
         uvicorn.run("emanusia.api:app", host="127.0.0.1", port=a.port)

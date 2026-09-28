@@ -9,13 +9,6 @@ from emanusia.tools import load_all, registry
 from emanusia.tools.workflow import render, run_steps
 
 
-@pytest.fixture(autouse=True)
-def env(tmp_path, monkeypatch):
-    monkeypatch.setenv("EMANUSIA_WORKSPACE", str(tmp_path / "ws"))
-    monkeypatch.setenv("EMANUSIA_WORKFLOWS", str(tmp_path / "wf"))
-    load_all()
-
-
 class FakeLLM:
     """Roteiro: 1) chama excel_write 2) responde."""
     def __init__(self, script): self.script = list(script)
@@ -75,11 +68,7 @@ def test_save_and_run_workflow_with_params():
     assert (config.workspace() / "y.txt").read_text() == "oi"
 
 
-def test_web_table_extraction_real_browser(monkeypatch):
-    monkeypatch.setenv("EMANUSIA_HEADLESS", "1")
-    monkeypatch.setattr(config, "HEADLESS", True)
-    if os.path.exists("/opt/pw-browsers/chromium"):
-        monkeypatch.setenv("EMANUSIA_CHROMIUM", "/opt/pw-browsers/chromium")
+def test_web_table_extraction_real_browser(headless):
     page = config.workspace() / "p.html"
     page.write_text("<table><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table>")
     try:

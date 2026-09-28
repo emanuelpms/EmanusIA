@@ -11,8 +11,11 @@ class Tool:
     description: str
     parameters: dict  # JSON Schema das propriedades
     fn: Callable[..., Any]
-    risky: bool = False  # ações que alteram sistemas externos pedem confirmação
+    risky: bool | Callable[[dict], bool] = False  # bool, ou função(args)->bool p/ risco dependente dos argumentos
     required: tuple = ()
+
+    def is_risky(self, args: dict | None = None) -> bool:
+        return bool(self.risky(args or {})) if callable(self.risky) else bool(self.risky)
 
     def schema(self) -> dict:
         return {"type": "function", "function": {

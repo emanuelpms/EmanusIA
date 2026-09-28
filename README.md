@@ -3,22 +3,34 @@
 Agente de IA que roda **100% no seu PC** (LLM via [Ollama](https://ollama.com)) e opera
 sistemas como um funcionário: navega em sites, gera Excel, datasets Power BI, dashboards e opera o SAP.
 
-## Instalação (Windows/Linux/Mac)
+## Instalação
+**Windows (recomendado — SAP e RPA de desktop só funcionam nele):** instale Python 3.10+ e o [Ollama](https://ollama.com),
+depois dê dois cliques em `instalar.bat` (uma vez) e `abrir.bat` (sempre). Manual:
 ```bash
-python -m venv .venv && .venv\Scripts\activate        # Linux/Mac: source .venv/bin/activate
-pip install -e ".[dev]"            # no Windows p/ SAP: pip install -e ".[sap,dev]"
+python -m venv .venv && .venv\Scripts\activate      # Linux/Mac: source .venv/bin/activate
+pip install -e ".[all,dev]"        # extras: sap, desktop, gui (janela nativa), sql
 playwright install chromium
-ollama pull qwen2.5:14b            # bom em tool-calling; PC fraco: qwen2.5:7b (EMANUSIA_MODEL)
+ollama pull qwen2.5:7b             # cérebro + ferramentas (cabe nos 6 GB da RTX 4050)
+ollama pull qwen2.5vl:3b           # visão (lê a tela)
 ```
+> Hardware de referência: Acer Nitro V15, 16 GB RAM, RTX 4050 (6 GB VRAM). Modelos de 7B em 4-bit rodam na GPU;
+> 14B+ ficariam lentos (transbordam para a RAM). Contexto limitado a 8k (`EMANUSIA_NUM_CTX`). O Ollama troca
+> entre o modelo de texto e o de visão sozinho.
 
 ## Uso
 ```bash
-emanusia chat                       # conversa no terminal
-emanusia run "Abra https://... extraia a tabela e gere um dashboard"
-emanusia serve                      # UI web em http://127.0.0.1:8765
-emanusia workflow exemplo-relatorio # roda automação salva, SEM LLM (rápido e determinístico)
+emanusia gui                        # interface gráfica (janela nativa; senão abre no navegador)
+emanusia chat | run "tarefa"        # terminal
+emanusia record https://site nome   # grava uma automação web (vira workflows/nome.yaml)
+emanusia workflow nome -p k=v       # roda automação salva, SEM LLM
+emanusia user add maria --role operator   # cria usuário (ativa login na GUI)
 emanusia tools                      # lista ferramentas (⚠️ = pede autorização)
 ```
+
+## GUI
+Chat com o robô · Automações (gravar, editar YAML, executar com parâmetros) · Agendamentos · Tarefas com
+passo a passo · Arquivos gerados (dashboards abrem em sandbox) · Usuários/Auditoria · Ajustes (troca de modelos).
+Ações de risco abrem um pop-up **Autorizar / Negar** e a tarefa espera sua resposta.
 
 ## Como funciona
 ```
@@ -38,8 +50,18 @@ Usuário ─► Agent (loop LLM) ─► Ferramentas ─► web · excel · dashb
 ## Variáveis
 `EMANUSIA_MODEL`, `EMANUSIA_OLLAMA_URL`, `EMANUSIA_WORKSPACE`, `EMANUSIA_WORKFLOWS`, `EMANUSIA_HEADLESS=1`, `EMANUSIA_MAX_STEPS`.
 
+## Recursos
+| Recurso | Como |
+|---|---|
+| Gravador web | injeta JS no navegador; cliques/campos viram passos; senha → `web_fill_secret` (nunca gravada) |
+| Visão | `vision_ask` / `vision_locate` (print → modelo multimodal). Experimental: modelos pequenos erram coordenadas |
+| RPA desktop | `desktop_*` via pywinauto (UI Automation, por nome de controle) + pyautogui (coordenadas). Windows |
+| Agendador | intervalo ou horário/dias; persiste em `data/schedules.json`; execução "sem supervisão" só por admin |
+| Multiusuário | papéis admin/operator/viewer, whitelist de ferramentas/workflows por usuário, login por cookie, auditoria em `data/audit.jsonl` (segredos mascarados) |
+| Conectores | e-mail SMTP/IMAP, Outlook, REST (`http_get`/`http_send`), SQL (`sql_query` só-leitura; SQLite ou ODBC via variável de ambiente) |
+
 ## Roadmap
-Gravador de ações web → workflow · visão (screenshot → LLM multimodal) para apps sem API · RPA desktop
-(pywinauto) para outros softwares · agendador embutido · multiusuário com permissões · mais conectores (Outlook, ERPs).
+Mais conectores (ERPs específicos, Teams/WhatsApp) · condicionais/loops nos workflows · empacotar em `.exe` (PyInstaller) ·
+recuperação automática de falhas em workflows (o LLM conserta seletores quebrados).
 
 Testes: `pytest`

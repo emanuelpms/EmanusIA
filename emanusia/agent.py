@@ -2,7 +2,7 @@
 import json
 from typing import Callable
 
-from . import config
+from . import auth, config
 from .tools import load_all, registry
 
 SYSTEM = """Você é o EmanusIA, um funcionário-robô que opera computadores para empresas.
@@ -21,17 +21,29 @@ def _shorten(obj, limit=4000) -> str:
 
 class Agent:
     def __init__(self, llm, confirm: Callable[[str, dict], bool] | None = None,
-                 on_event: Callable[[str, dict], None] | None = None):
+                 on_event: Callable[[str, dict], None] | None = None,
+                 user: auth.User | None = None):
         load_all()
         self.llm = llm
+        self.user = user or auth.LOCAL_ADMIN
         # sem callback de confirmação => ações de risco são bloqueadas (seguro por padrão)
         self.confirm = confirm or (lambda name, args: False)
         self.on_event = on_event or (lambda kind, data: None)
 
     def run(self, task: str, history: list[dict] | None = None) -> str:
+        # contexto restaurado ao final: uma tarefa nunca herda usuário/aprovação da anterior
+        t_user, t_conf = auth.CURRENT_USER.set(self.user), auth.CURRENT_CONFIRM.set(self.confirm)
+        try:
+            return self._run(task, history)
+        finally:
+            auth.CURRENT_USER.reset(t_user)
+            auth.CURRENT_CONFIRM.reset(t_conf)
+
+    def _run(self, task: str, history: list[dict] | None) -> str:
+        auth.audit(self.user.name, "agent_task", task=task)
         messages = [{"role": "system", "content": SYSTEM}, *(history or []),
                     {"role": "user", "content": task}]
-        schemas = [t.schema() for t in registry.all_tools()]
+        schemas = [t.schema() for t in registry.all_tools() if self.user.may_use_tool(t.name)]
         for _ in range(config.MAX_STEPS):
             msg = self.llm.chat(messages, schemas)
             messages.append(msg)
@@ -52,8 +64,16 @@ class Agent:
     def _execute(self, name: str, args: dict):
         try:
             t = registry.get(name)
-            if t.risky and not self.confirm(name, args):
+            if not self.user.may_use_tool(name):
+                raise PermissionError(f"Usuário '{self.user.name}' sem permissão para {name}")
+            if name == "run_workflow" and not self.user.may_run_workflow(args.get("name", "")):
+                raise PermissionError(f"Usuário '{self.user.name}' sem permissão neste workflow")
+            if t.is_risky(args) and not (self.user.can_approve and self.confirm(name, args)):
+                auth.audit(self.user.name, "tool_denied", tool=name, args=args)
                 return {"error": "Ação de risco não autorizada pelo usuário."}
-            return registry.call(name, args)
+            result = registry.call(name, args)
+            auth.audit(self.user.name, "tool", tool=name, args=args, ok=True)
+            return result
         except Exception as e:  # o LLM precisa ver o erro para se corrigir
+            auth.audit(self.user.name, "tool", tool=name, args=args, ok=False, error=str(e))
             return {"error": f"{type(e).__name__}: {e}"}

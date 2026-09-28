@@ -11,7 +11,7 @@ import re
 
 import yaml
 
-from .. import config
+from .. import auth, config
 from . import registry
 from .registry import tool
 
@@ -39,14 +39,25 @@ def render(value, ctx: dict):
     return value
 
 
-def run_steps(wf: dict, params: dict | None = None, confirm=None) -> dict:
+def run_steps(wf: dict, params: dict | None = None, confirm=None, user=None) -> dict:
+    """Executa os passos. Ações de risco exigem `confirm` (sem ele, são negadas)."""
+    user = user or auth.CURRENT_USER.get()
+    confirm = confirm or auth.CURRENT_CONFIRM.get()
+    if not user.may_run_workflow(wf.get("name", "")):
+        raise PermissionError(f"Usuário '{user.name}' sem permissão no workflow '{wf.get('name')}'")
     ctx = {**wf.get("params", {}), **(params or {})}
     log = []
+    auth.audit(user.name, "workflow_start", workflow=wf.get("name"), params=params)
     for i, step in enumerate(wf["steps"], 1):
         t = registry.get(step["tool"])
-        if t.risky and confirm is not None and not confirm(t.name, step.get("args", {})):
+        if not user.may_use_tool(t.name):
+            raise PermissionError(f"Passo {i}: usuário sem permissão para {t.name}")
+        args = render(step.get("args", {}), ctx)
+        if t.is_risky(args) and not (confirm and confirm(t.name, args)):
+            auth.audit(user.name, "tool_denied", tool=t.name, workflow=wf.get("name"))
             raise PermissionError(f"Passo {i} ({t.name}) não autorizado")
-        result = t.fn(**render(step.get("args", {}), ctx))
+        result = t.fn(**args)
+        auth.audit(user.name, "tool", tool=t.name, args=args, workflow=wf.get("name"), ok=True)
         if step.get("save_as"):
             ctx[step["save_as"]] = result
         log.append({"step": i, "tool": t.name, "ok": True})
