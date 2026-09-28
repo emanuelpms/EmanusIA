@@ -1,0 +1,24 @@
+# Exemplo: lê um CSV do workspace e gera Excel + dashboard + dataset Power BI (sem LLM).
+name: exemplo-relatorio
+description: Vendas por mês -> Excel, dashboard e Power BI
+params: {}
+steps:
+  - tool: excel_write
+    args:
+      path: vendas.xlsx
+      sheets:
+        Vendas: [[Mês, Receita, Custo], [Jan, 100, 60], [Fev, 130, 70], [Mar, 160, 90]]
+      chart: {sheet: Vendas, type: bar, value_cols: [2, 3]}
+  - tool: dashboard_build
+    args:
+      path: dashboard.html
+      title: Vendas Q1
+      subtitle: Gerado automaticamente pelo EmanusIA
+      kpis: [{label: Receita, value: "R$ 390", delta: "+12%"}, {label: Custo, value: "R$ 220", delta: "-3%"}]
+      charts:
+        - {type: bar, title: Receita x Custo, x: [Jan, Fev, Mar], series: {Receita: [100, 130, 160], Custo: [60, 70, 90]}}
+        - {type: pie, title: Receita por mês, x: [Jan, Fev, Mar], series: {Receita: [100, 130, 160]}}
+  - tool: powerbi_export
+    args:
+      name: vendas
+      rows: [[Mês, Receita, Custo], [Jan, 100, 60], [Fev, 130, 70], [Mar, 160, 90]]

@@ -1,0 +1,71 @@
+import argparse
+import json
+import sys
+
+import yaml
+
+from . import config
+from .agent import Agent
+from .llm import OllamaClient
+from .tools import load_all
+from .tools.workflow import _path, run_steps
+
+
+def _confirm(name: str, args: dict) -> bool:
+    print(f"\n⚠️  Ação de risco: {name} {json.dumps(args, ensure_ascii=False)[:300]}")
+    return input("Autorizar? [s/N] ").strip().lower() in ("s", "y")
+
+
+def _event(kind: str, data: dict):
+    if kind == "tool_call":
+        print(f"  → {data['name']}({json.dumps(data['args'], ensure_ascii=False)[:200]})")
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser("emanusia")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("chat", help="conversa com o robô no terminal")
+    r = sub.add_parser("run", help="executa uma tarefa única em linguagem natural")
+    r.add_argument("task")
+    w = sub.add_parser("workflow", help="roda uma automação salva (sem LLM)")
+    w.add_argument("name")
+    w.add_argument("-p", "--param", action="append", default=[], help="chave=valor")
+    s = sub.add_parser("serve", help="API + interface web local")
+    s.add_argument("--port", type=int, default=8765)
+    sub.add_parser("tools", help="lista as ferramentas disponíveis")
+    a = ap.parse_args(argv)
+
+    if a.cmd == "tools":
+        load_all()
+        from .tools import registry
+        for t in registry.all_tools():
+            print(f"{'⚠️ ' if t.risky else '   '}{t.name:22} {t.description[:80]}")
+    elif a.cmd == "serve":
+        import uvicorn
+        uvicorn.run("emanusia.api:app", host="127.0.0.1", port=a.port)
+    elif a.cmd == "workflow":
+        load_all()
+        wf = yaml.safe_load(_path(a.name).read_text(encoding="utf-8"))
+        params = dict(p.split("=", 1) for p in a.param)
+        print(json.dumps(run_steps(wf, params, confirm=_confirm), ensure_ascii=False, indent=2))
+    else:
+        agent = Agent(OllamaClient(), confirm=_confirm, on_event=_event)
+        if a.cmd == "run":
+            print(agent.run(a.task))
+        else:
+            print(f"EmanusIA ({config.MODEL}) — workspace: {config.workspace()}. Ctrl+C sai.")
+            hist: list[dict] = []
+            while True:
+                try:
+                    task = input("\nvocê> ").strip()
+                except (EOFError, KeyboardInterrupt):
+                    return 0
+                if task:
+                    ans = agent.run(task, hist)
+                    hist += [{"role": "user", "content": task}, {"role": "assistant", "content": ans}]
+                    print(f"\nrobô> {ans}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

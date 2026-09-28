@@ -1,0 +1,26 @@
+[project]
+name = "emanusia"
+version = "0.1.0"
+description = "Funcionário-robô local: agente de IA (Ollama) para automação web, Excel, Power BI, dashboards e SAP"
+requires-python = ">=3.10"
+dependencies = [
+  "httpx>=0.27", "pydantic>=2", "pyyaml", "openpyxl", "pandas", "plotly",
+  "playwright", "fastapi", "uvicorn",
+]
+
+[project.optional-dependencies]
+sap = ["pywin32; sys_platform == 'win32'"]
+dev = ["pytest"]
+
+[project.scripts]
+emanusia = "emanusia.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["emanusia*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
