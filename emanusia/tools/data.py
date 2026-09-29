@@ -283,7 +283,7 @@ def data_combine(pattern: str, sheet=None, output=None, source_column="arquivo_o
         raise FileNotFoundError(f"Nenhuma planilha em '{pattern}'")
     frames = []
     for f in files:
-        rel = str(config.safe_path(f).relative_to(root))
+        rel = config.safe_path(f).relative_to(root).as_posix()
         d = load(rel, sheet)
         if source_column:
             d[source_column] = rel

@@ -269,7 +269,8 @@ def test_tool_routing_keeps_prompt_small():
     assert "web_open" in web and "sap_run_transaction" not in web and "excel_write" in web
     sap = names("rodar a transação VA01 no SAP")
     assert "sap_run_transaction" in sap and "web_click" not in sap
-    assert "sap_run_transaction" in names("xyz qualquer coisa")  # sem pista: oferece tudo
+    generic = names("xyz qualquer coisa")  # sem pista: só o básico (tudo não cabe no contexto de 8k)
+    assert "create_bot" in generic and "sap_run_transaction" not in generic and len(generic) < 20
 
 
 # ---------------------------------------------------------------- e-mail

@@ -7,7 +7,7 @@ from .registry import tool
 @tool("file_list", "Lista arquivos do workspace.", {"subdir": {"type": "string"}})
 def file_list(subdir: str = "."):
     base = config.safe_path(subdir)
-    return sorted(str(p.relative_to(config.workspace())) for p in base.rglob("*") if p.is_file())
+    return sorted(p.relative_to(config.workspace()).as_posix() for p in base.rglob("*") if p.is_file())
 
 
 @tool("file_read", "Lê um arquivo de texto do workspace.", {"path": {"type": "string"}},

@@ -31,6 +31,8 @@ COOKIE = "emanusia_token"
 @asynccontextmanager
 async def lifespan(app):
     global manager, _sched
+    from .doctor import setup_logging
+    setup_logging()
     manager = JobManager()
     if not os.environ.get("EMANUSIA_NO_SCHEDULER"):
         _sched = scheduler.Scheduler(manager.on_scheduled)
@@ -125,6 +127,19 @@ class Settings(BaseModel):
     auto_create_bots: bool | None = None
     suggest_min_repeats: int | None = None
     company_name: str | None = None
+
+
+@app.get("/api/health")
+def health(u: auth.User = Depends(current_user)):
+    """A IA local está pronta? (Ollama aberto, modelo instalado) — mostrado no Chat."""
+    return OllamaClient().health()
+
+
+@app.get("/api/doctor")
+def doctor_api(u: auth.User = Depends(admin)):
+    """Diagnóstico completo do computador (Ajustes → Diagnóstico)."""
+    from . import doctor
+    return doctor.run()
 
 
 @app.post("/api/settings")
@@ -330,7 +345,7 @@ def schedule_toggle(sid: str, b: Toggle, u: auth.User = Depends(runner)):
 @app.get("/api/files")
 def files(u: auth.User = Depends(current_user)):
     root = config.workspace()
-    return sorted(({"path": str(p.relative_to(root)), "size": p.stat().st_size,
+    return sorted(({"path": p.relative_to(root).as_posix(), "size": p.stat().st_size,
                     "mtime": p.stat().st_mtime} for p in root.rglob("*") if p.is_file()),
                   key=lambda f: -f["mtime"])[:300]
 

@@ -20,6 +20,11 @@ def _event(kind: str, data: dict):
 
 
 def main(argv=None):
+    for stream in (sys.stdout, sys.stderr):  # console do Windows (cp1252) não quebra com acentos/emoji
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
     ap = argparse.ArgumentParser("emanusia")
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("chat", help="conversa com o robô no terminal")
@@ -37,6 +42,7 @@ def main(argv=None):
     b.add_argument("id", nargs="?")
     b.add_argument("-p", "--param", action="append", default=[], help="chave=valor")
     sub.add_parser("demo", help="cria uma empresa de exemplo com bots para ver o escritório")
+    sub.add_parser("doctor", help="diagnóstico: confere se tudo está pronto neste computador")
     g = sub.add_parser("gui", help="abre a interface gráfica (janela nativa ou navegador)")
     g.add_argument("--port", type=int, default=8765)
     rec = sub.add_parser("record", help="grava uma automação web usando o navegador")
@@ -50,6 +56,8 @@ def main(argv=None):
     u.add_argument("--reviewer", action="store_true", help="padrinho: revisa e libera bots de outras pessoas")
     sub.add_parser("tools", help="lista as ferramentas disponíveis")
     a = ap.parse_args(argv)
+    from .doctor import setup_logging
+    setup_logging()
 
     if a.cmd == "tools":
         load_all()
@@ -90,6 +98,12 @@ def main(argv=None):
             print(f"Equipe acessa em http://<ip-deste-pc>:{a.port}/ (escritório em /office). "
                   "Libere a porta no Firewall do Windows. Tráfego sem HTTPS: use só em rede interna.")
         uvicorn.run("emanusia.api:app", host="0.0.0.0" if a.lan else "127.0.0.1", port=a.port)
+    elif a.cmd == "doctor":
+        from . import doctor
+        print("Verificando (pode levar até 1 minuto na primeira vez)...")
+        rep = doctor.run()
+        doctor.print_report(rep)
+        return 0 if rep["ok"] else 1
     elif a.cmd == "demo":
         load_all()
         from .demo import seed
@@ -122,10 +136,15 @@ def main(argv=None):
         print(json.dumps(run_steps(wf, params, confirm=_confirm), ensure_ascii=False, indent=2))
     else:
         agent = Agent(OllamaClient(), confirm=_confirm, on_event=_event)
+        from .llm import LLMError
         if a.cmd == "run":
-            print(agent.run(a.task))
+            try:
+                print(agent.run(a.task))
+            except LLMError as e:
+                print(f"❌ {e}")
+                return 1
         else:
-            print(f"EmanusIA ({config.MODEL}) — workspace: {config.workspace()}. Ctrl+C sai.")
+            print(f"EmanusIA ({config.settings()['model']}) — workspace: {config.workspace()}. Ctrl+C sai.")
             hist: list[dict] = []
             while True:
                 try:
@@ -133,7 +152,11 @@ def main(argv=None):
                 except (EOFError, KeyboardInterrupt):
                     return 0
                 if task:
-                    ans = agent.run(task, hist)
+                    try:
+                        ans = agent.run(task, hist)
+                    except LLMError as e:
+                        print(f"\n❌ {e}")
+                        continue
                     hist += [{"role": "user", "content": task}, {"role": "assistant", "content": ans}]
                     print(f"\nrobô> {ans}")
     return 0

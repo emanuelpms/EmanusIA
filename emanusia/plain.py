@@ -253,6 +253,9 @@ def _step_at(code: dict | None, path: str | None) -> dict | None:
 def explain_error(err: str, step: dict | None = None) -> str:
     e = str(err or "")
     what = f"“{target(step.get('args') or {}, step)}”" if step and "tool" in step else "o que precisava"
+    m = re.match(r"LLMError:\s*(.+)", e, re.S)
+    if m:  # problema com a IA local: a mensagem já vem explicada
+        return m.group(1).strip()
     rules = [
         (r"Timeout.*(locator|waiting for|wait_for)|strict mode|not visible|element is not",
          f"Não encontrei {what} na tela. O site pode ter mudado ou demorado para carregar. "

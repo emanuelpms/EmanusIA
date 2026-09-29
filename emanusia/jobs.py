@@ -9,6 +9,8 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Callable
 
+import logging
+
 from . import auth, bots, events, plain, scheduler
 from .agent import Agent
 from .llm import OllamaClient
@@ -82,6 +84,7 @@ class JobManager:
             except Exception as e:
                 job.result, job.status = f"{type(e).__name__}: {e}", "error"
                 job.plain_error = plain.explain_error(job.result)
+                logging.getLogger("emanusia").exception("tarefa %s (%s: %s) falhou", job.id, job.kind, job.title)
                 auth.audit(job.user, "job_error", job=job.id, kind=job.kind, error=str(e))
             if actor:
                 events.emit("job_done", bot=actor, job=job.id, ok=job.status == "done",

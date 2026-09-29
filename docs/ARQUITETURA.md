@@ -182,8 +182,15 @@ HTTPS: use só na rede interna da empresa. O Escritório fica em `http://<ip-do-
 para uma TV).
 
 ### 6.5 Problemas comuns
+**Primeiro passo sempre:** dê dois cliques em **`diagnostico.bat`** (ou `emanusia doctor`, ou Ajustes →
+🩺 Diagnóstico). Ele confere Python, pacotes, navegador dos robôs, Ollama, modelos, se a IA está usando
+ferramentas, se o modelo está na placa de vídeo, cofre e SAP, e mostra o conserto de cada item. Erros
+completos ficam em `data/logs/emanusia.log`.
+
 | Sintoma | Causa provável / solução |
 |---|---|
+| Chat mostra "A IA ainda não está pronta" | Siga a mensagem: abrir o Ollama ou `ollama pull qwen2.5:7b` |
+| "O modelo ... não sabe usar ferramentas" | Em Ajustes, volte para `qwen2.5:7b` |
 | "Ollama não respondeu" em Ajustes | Abra o Ollama; rode `ollama list` para ver os modelos |
 | Chat lento | Outro programa usando a GPU; feche jogos. Contexto de 8k é o limite para 6 GB |
 | "Outlook só funciona no Windows..." | Outlook fechado ou não instalado; ou troque para SMTP em Ajustes |

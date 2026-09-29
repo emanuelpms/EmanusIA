@@ -129,12 +129,19 @@ async function answer(id, ok) { closeModal(); approvalShown = null; await api(`/
 
 /* ---------- Chat ---------- */
 function viewChat() {
-  $('#main').innerHTML = `<div id="chat"><div id="msgs"></div>
+  $('#main').innerHTML = `<div id="chat"><div id="aiwarn"></div><div id="msgs"></div>
   <div class="row"><textarea id="inp" rows="2" placeholder="Peça uma tarefa: ex. 'Leia vendas.xlsx e gere um dashboard'" ${readonly()?'disabled':''}></textarea>
   <button class="b" id="send" onclick="send()" ${readonly()?'disabled':''}>Enviar</button></div></div>`;
   $('#inp').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
   HISTORY.forEach(m => bubble(m.role === 'user' ? 'u' : 'a', m.content));
-  if (!HISTORY.length) bubble('a', 'Olá! Sou seu funcionário-robô. Posso automatizar sites, gerar Excel/Power BI/dashboards, operar o SAP e outros programas. O que fazemos?');
+  if (!HISTORY.length) bubble('a', 'Olá! Sou seu funcionário-robô. Posso fazer tarefas agora (sites, planilhas, dashboards, e-mail, SAP) ou criar um robô para você: é só dizer "crie um robô que...". O que fazemos?');
+  checkAI();
+}
+async function checkAI() {   // avisa na hora se a IA local não está pronta, com o que fazer
+  try { const h = await api('/api/health');
+    $('#aiwarn').innerHTML = h.ok ? (h.message ? `<div class="note warn small">${esc(h.message)}</div>` : '')
+      : `<div class="note bad"><b>A IA ainda não está pronta:</b> ${esc(h.message)} <button class="b sec" onclick="checkAI()">Verificar de novo</button></div>`;
+  } catch (e) {}
 }
 function bubble(cls, text) { const d = document.createElement('div'); d.className = 'm ' + cls; d.textContent = text; $('#msgs').append(d); $('#msgs').scrollTop = 1e9; return d; }
 async function send() {
@@ -151,6 +158,7 @@ async function send() {
     box.textContent = j.status === 'error' ? '❌ ' + (j.plain_error || ans) : ans;
     HISTORY.push({role:'user', content: task}, {role:'assistant', content: ans});
   } catch (e) { box.textContent = '❌ ' + e.message; }
+  if ($('#aiwarn')) checkAI();
   $('#send').disabled = false;
 }
 
@@ -509,7 +517,7 @@ async function genBot() {
   try {
     const j0 = await api('/api/bots/generate', 'POST', {description: d});
     const j = await follow(j0.id, () => {});
-    if (j.status === 'error') throw new Error(j.result);
+    if (j.status === 'error') throw new Error(j.plain_error || j.result);
     botEditor(null, j.result.yaml, j.result.validation, `Gerado em ${j.result.attempts} tentativa(s).`, 'ia');
   } catch (e) { toast(e.message); }
   if ($('#bgen')) { $('#bgen').disabled = false; $('#bgen').textContent = '✨ Gerar código com IA'; }
@@ -659,9 +667,19 @@ async function viewCfg() {
   <div class="card"><b>Aprendizado</b>
   <label><input type="checkbox" id="ac" style="width:auto" ${S.auto_create_bots ? 'checked' : ''} ${dis}> Criar bots automaticamente quando uma rotina se repetir (entram como rascunho validado; um humano ativa)</label>
   <label>Repetições para sugerir um bot</label><input id="mr" type="number" min="2" value="${esc(S.suggest_min_repeats)}" ${dis} style="max-width:120px"></div>
+  <div class="card"><b>🩺 Diagnóstico</b><p class="small mut">Confere Ollama, modelos, placa de vídeo, navegador dos robôs, cofre e integrações do Windows.</p>
+  <button class="b sec" ${dis} onclick="runDoctor()">Rodar diagnóstico</button><div id="doc"></div></div>
   <p><button class="b" ${dis} onclick="saveCfg()">Salvar ajustes</button> <span class="mut small">${adm ? '' : 'Somente admin altera ajustes.'}</span></p>
   <div class="card"><b>Ferramentas disponíveis</b> <span class="mut small">(⚠️ = pede autorização)</span>
   <table>${tools.map(t => `<tr style="${t.allowed ? '' : 'opacity:.4'}"><td><code>${esc(t.name)}</code> ${t.risky ? '⚠️' : ''}</td><td class="small mut">${esc(t.group)}</td><td class="small">${esc(t.description)}<br><span class="mut">args: ${esc(t.args.join(', ') || '—')}</span></td></tr>`).join('')}</table></div>`;
+}
+async function runDoctor() {
+  $('#doc').innerHTML = '<p class="mut">⏳ Verificando (até 1 minuto)...</p>';
+  try { const r = await api('/api/doctor'); const ic = {ok: '✅', aviso: '⚠️', erro: '❌'};
+    $('#doc').innerHTML = `<table>${r.items.map(i => `<tr><td>${ic[i.level]}</td><td><b>${esc(i.name)}</b><div class="small mut">${esc(i.detail)}</div>
+      ${i.fix && i.level !== 'ok' ? `<div class="small">→ ${esc(i.fix)}</div>` : ''}</td></tr>`).join('')}</table>
+      ${r.errors.length ? `<p class="small"><b>Últimos erros:</b></p><pre>${esc(r.errors.join('\n'))}</pre>` : ''}<p class="small mut">Registro: ${esc(r.log)}</p>`;
+  } catch (e) { $('#doc').innerHTML = `<p style="color:var(--bad)">${esc(e.message)}</p>`; }
 }
 async function saveCfg() {
   try { await api('/api/settings', 'POST', {company_name: $('#cc').value, model: $('#cm').value, vision_model: $('#cv').value, email_provider: $('#ep').value,

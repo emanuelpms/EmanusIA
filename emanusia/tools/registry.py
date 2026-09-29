@@ -21,6 +21,16 @@ GROUP_KEYWORDS = {
             r"cruz|consolid|pdf|indicador|kpi|grafico|soma|media|total|filtr|agrup|limp|duplicad|extrair",
     "access": r"login|logar|entrar|senha|acesso|credencia|autentic|logon",
 }
+# Ferramentas avançadas: continuam disponíveis nos robôs (YAML), mas não são oferecidas ao chat,
+# para não encher o contexto do modelo com opções que ele raramente usa bem.
+AGENT_HIDDEN = {"web_eval", "web_hover", "web_scroll", "web_type", "web_check", "web_count", "web_attr",
+                "web_back", "web_tabs", "web_switch_tab", "web_frame", "web_on_dialog", "web_upload",
+                "web_save_session", "web_fill_secret", "web_exists", "desktop_click_xy", "desktop_hotkey",
+                "sap_call", "sap_select", "vision_locate", "http_send", "sql_execute", "powerbi_push_rows",
+                "run_workflow", "save_workflow", "list_workflows", "excel_read"}
+# Se a ferramenta não couber no orçamento, sai primeiro quem está no começo desta lista.
+DROP_ORDER = ["vision", "powerbi", "connectors", "desktop", "sap", "access", "mail", "dashboard", "data",
+              "web", "excel", "files", "workflow"]
 
 
 @dataclass
@@ -36,9 +46,12 @@ class Tool:
     def is_risky(self, args: dict | None = None) -> bool:
         return bool(self.risky(args or {})) if callable(self.risky) else bool(self.risky)
 
-    def schema(self) -> dict:
+    def schema(self, compact: bool = False) -> dict:
+        desc = self.description
+        if compact:  # 1ª frase, curta: economiza contexto do modelo local
+            desc = desc.split(". ")[0].rstrip(".")[:160]
         return {"type": "function", "function": {
-            "name": self.name, "description": self.description,
+            "name": self.name, "description": desc,
             "parameters": {"type": "object", "properties": self.parameters,
                            "required": list(self.required)}}}
 
@@ -63,10 +76,10 @@ def all_tools() -> list[Tool]:
 
 
 def groups_for(text: str) -> set[str]:
-    """Grupos relevantes para a tarefa. Se nada casar, todos (melhor sobrar do que faltar)."""
+    """Grupos relevantes para a tarefa: os básicos + os que o texto menciona.
+    (Nunca "todos": 80+ ferramentas não cabem no contexto de um modelo 7B.)"""
     t = unicodedata.normalize("NFKD", text.lower()).encode("ascii", "ignore").decode()
-    hit = {g for g, rx in GROUP_KEYWORDS.items() if re.search(rx, t)}
-    return CORE_GROUPS | hit if hit else {tl.group for tl in _TOOLS.values()}
+    return CORE_GROUPS | {g for g, rx in GROUP_KEYWORDS.items() if re.search(rx, t)}
 
 
 def call(name: str, args: dict | None = None) -> Any:

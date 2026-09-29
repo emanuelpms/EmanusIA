@@ -40,13 +40,20 @@ steps:
 """
 
 
-def tool_catalog(user: auth.User) -> str:
+NOT_FOR_BOTS = {"save_workflow", "run_workflow", "list_workflows", "run_bot", "create_bot", "list_bots",
+                "web_eval", "desktop_click_xy", "list_credentials"}
+
+
+def tool_catalog(user: auth.User, description: str = "") -> str:
+    """Catálogo compacto só com os grupos do assunto (cabe no contexto de um modelo 7B)."""
+    groups = registry.groups_for(description) if description else {t.group for t in registry.all_tools()}
     lines = []
     for t in registry.all_tools():
-        if not user.may_use_tool(t.name) or t.name in ("save_workflow", "run_bot"):
+        if t.group not in groups or t.name in NOT_FOR_BOTS or not user.may_use_tool(t.name):
             continue
         args = ", ".join(a + ("*" if a in t.required else "") for a in t.parameters)
-        lines.append(f"- {t.name}({args}){' ⚠' if t.risky else ''}: {t.description[:110]}")
+        desc = t.description.split(". ")[0][:90]
+        lines.append(f"- {t.name}({args}){' ⚠' if t.risky else ''}: {desc}")
     return "\n".join(lines)
 
 
@@ -61,8 +68,9 @@ def generate(description: str, llm, user: auth.User, max_attempts: int = 3) -> d
     examples = EXAMPLE + "".join(
         f"\nJá funcionou antes para \"{h['task']}\":\n"
         f"{yaml.safe_dump({'steps': h['steps']}, allow_unicode=True)}" for h in hints)
-    messages = [{"role": "system", "content": PROMPT.format(tools=tool_catalog(user), examples=examples)},
-                {"role": "user", "content": f"Crie o bot: {description}"}]
+    base = [{"role": "system", "content": PROMPT.format(tools=tool_catalog(user, description), examples=examples)},
+            {"role": "user", "content": f"Crie o bot: {description}"}]
+    messages = list(base)
     best = None
     for attempt in range(1, max_attempts + 1):
         text = llm.chat(messages).get("content", "")
@@ -82,7 +90,8 @@ def generate(description: str, llm, user: auth.User, max_attempts: int = 3) -> d
                 "attempts": attempt}
         if rep["ok"]:
             return best
-        messages += [{"role": "assistant", "content": text},
-                     {"role": "user", "content": "O validador encontrou erros. Corrija e responda só "
-                      "com o YAML completo:\n- " + "\n- ".join(rep["errors"][:10])}]
+        # só a última tentativa volta ao modelo (a conversa não cresce a cada correção)
+        messages = base + [{"role": "assistant", "content": text[:3000]},
+                           {"role": "user", "content": "O validador encontrou erros. Corrija e responda só "
+                            "com o YAML completo:\n- " + "\n- ".join(rep["errors"][:8])}]
     return best

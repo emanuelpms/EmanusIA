@@ -27,6 +27,11 @@ cresce conforme a empresa contrata mais bots.
 2. Dê dois cliques em `instalar.bat` (uma vez). Ele instala tudo e baixa os modelos
    `qwen2.5:7b` (raciocínio, cabe nos 6 GB da RTX 4050) e `qwen2.5vl:3b` (visão).
 3. `abrir.bat` abre o sistema. Para ver uma empresa de exemplo: `emanusia demo`.
+4. Algo não funcionou? Dê dois cliques em **`diagnostico.bat`**: ele diz o que falta e como consertar.
+
+No **Chat** você pode pedir tarefas ("analise vendas.xlsx e faça um dashboard") ou **criar robôs**
+("crie um robô que baixa as notas do portal e manda por e-mail") — o robô nasce em rascunho, com os
+passos em português, para conferir, ensaiar e pedir revisão.
 
 Manual: `pip install -e ".[all,dev]"`, `playwright install chromium`, `ollama pull qwen2.5:7b`.
 
