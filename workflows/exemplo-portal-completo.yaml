@@ -1,0 +1,91 @@
+# Exemplo de automação empresarial completa em um portal web (adapte seletores e URL).
+# Mostra: sessão de login reaproveitada, senha por variável de ambiente, espera explícita,
+# iframe, paginação com while, coleta estruturada, retry, try/catch, Excel, dashboard e e-mail.
+name: exemplo-portal-completo
+description: Coleta pedidos paginados de um portal, gera Excel + dashboard e envia pelo Outlook
+params:
+  url: https://portal.fornecedor.com.br
+  usuario: robo@empresa.com
+  destino: financeiro@empresa.com
+  max_paginas: 20
+steps:
+  # 1) Login: reaproveita a sessão salva; se cair na tela de login, entra de novo
+  - tool: web_open
+    args: {url: "{{url}}/pedidos", session: portal}
+  - tool: web_exists
+    args: {selector: "input[type=password]", timeout_s: 3}
+    save_as: precisa_login
+  - if: "precisa_login"
+    then:
+      - tool: web_fill
+        args: {selector: "input[name=email]", value: "{{usuario}}"}
+      - tool: web_fill_secret
+        args: {selector: "input[type=password]", env_var: SENHA_PORTAL}
+      - tool: web_press
+        args: {key: Enter}
+      - tool: web_wait
+        args: {url_contains: /pedidos, timeout_s: 30}
+      - tool: web_save_session
+        args: {name: portal}
+
+  # 2) A grade de pedidos fica dentro de um iframe
+  - tool: web_frame
+    args: {selector: "iframe#conteudo"}
+  - tool: web_wait
+    args: {selector: ".linha-pedido", timeout_s: 20}
+    retry: 2
+    retry_delay: 5
+
+  # 3) Paginação: coleta página por página até não haver "Próxima"
+  - set: {pedidos: [], pagina: 1, tem_proxima: true}
+  - while: "tem_proxima and pagina <= max_paginas"
+    max: 50
+    steps:
+      - log: "lendo página {{pagina}}"
+      - tool: web_extract
+        args:
+          item_selector: .linha-pedido
+          fields: {numero: .numero, cliente: .cliente, valor: .valor, status: .status}
+        save_as: lote
+      - set: {pedidos: "=pedidos + lote", pagina: "=pagina + 1"}
+      - tool: web_exists
+        args: {selector: "button.proxima:not([disabled])"}
+        save_as: tem_proxima
+      - if: "tem_proxima"
+        then:
+          - tool: web_click
+            args: {selector: "button.proxima"}
+          - tool: web_wait
+            args: {}
+  - tool: web_frame
+    args: {}
+
+  - if: "len(pedidos) == 0"
+    then:
+      - fail: "Nenhum pedido encontrado no portal"
+
+  # 4) Relatórios (se um falhar, os outros continuam e o erro vai no e-mail)
+  - set: {linhas: [[Número, Cliente, Valor, Status]], erro: ""}
+  - for_each: pedidos
+    as: p
+    steps:
+      - set: {linhas: "=linhas + [[p['numero'], p['cliente'], p['valor'], p['status']]]"}
+  - set: {total_pedidos: "=len(pedidos)"}
+  - try:
+      - tool: excel_write
+        args: {path: portal/pedidos.xlsx, sheets: {Pedidos: "{{linhas}}"}}
+      - tool: dashboard_build
+        args:
+          path: portal/pedidos.html
+          title: Pedidos do portal
+          kpis: [{label: Pedidos, value: "{{total_pedidos}}"}]
+    catch:
+      - log: "falha ao gerar relatório: {{erro}}"
+
+  # 5) E-mail pelo Outlook (pede autorização ao rodar, a não ser que o admin libere)
+  - tool: email_send
+    args:
+      to: "{{destino}}"
+      subject: "Pedidos do portal — {{pagina}} páginas lidas"
+      body: "Segue a planilha com os pedidos coletados. {{erro}}"
+      attachments: [portal/pedidos.xlsx]

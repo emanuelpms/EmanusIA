@@ -1,22 +1,32 @@
-"""Loop do agente: LLM decide -> executa ferramentas -> observa -> repete."""
+"""Loop do agente: LLM decide -> executa ferramentas -> observa -> repete.
+Cada tarefa concluída vira experiência (learning.py) que ajuda nas próximas e gera sugestões de bots."""
 import json
 from typing import Callable
 
-from . import auth, config
+from . import auth, config, learning
 from .tools import load_all, registry
 
 SYSTEM = """Você é o EmanusIA, um funcionário-robô que opera computadores para empresas.
-Você automatiza sites (navegador), gera planilhas Excel, datasets Power BI, dashboards HTML e
-opera o SAP via SAP GUI Scripting. Use SEMPRE as ferramentas para agir; não invente resultados.
-Regras: trabalhe em passos curtos, confira o resultado de cada ferramenta, nunca peça/exiba
-senhas (elas vêm de variáveis de ambiente), e ao terminar responda em português com um resumo
-objetivo e os caminhos dos arquivos gerados. Se um usuário quiser repetir uma tarefa, salve-a
-com save_workflow."""
+Você automatiza sites (navegador), gera planilhas Excel, datasets Power BI, dashboards HTML,
+envia e-mails (Outlook) e opera o SAP e outros programas. Use SEMPRE as ferramentas para agir;
+não invente resultados. Regras: trabalhe em passos curtos, confira o resultado de cada ferramenta,
+nunca peça/exiba senhas (elas vêm de variáveis de ambiente), e ao terminar responda em português
+com um resumo objetivo e os caminhos dos arquivos gerados. Se já existir um bot para a tarefa
+(list_bots), prefira executá-lo com run_bot."""
 
 
 def _shorten(obj, limit=4000) -> str:
     s = json.dumps(obj, ensure_ascii=False, default=str)
     return s if len(s) <= limit else s[:limit] + f"... [truncado {len(s) - limit} chars]"
+
+
+def _hints(task: str) -> str:
+    out = []
+    for h in learning.similar(task, k=2):
+        steps = "; ".join(f"{s['tool']}({_shorten(s['args'], 160)})" for s in h["steps"][:8])
+        out.append(f"- \"{h['task'][:120]}\": {steps}")
+    return ("\n\nExperiência anterior (tarefas parecidas que deram certo; adapte os valores):\n"
+            + "\n".join(out)) if out else ""
 
 
 class Agent:
@@ -39,18 +49,26 @@ class Agent:
             auth.CURRENT_USER.reset(t_user)
             auth.CURRENT_CONFIRM.reset(t_conf)
 
+    def tools_for(self, task: str) -> list[dict]:
+        groups = registry.groups_for(task)
+        return [t.schema() for t in registry.all_tools()
+                if t.group in groups and self.user.may_use_tool(t.name)]
+
     def _run(self, task: str, history: list[dict] | None) -> str:
         auth.audit(self.user.name, "agent_task", task=task)
-        messages = [{"role": "system", "content": SYSTEM}, *(history or []),
+        messages = [{"role": "system", "content": SYSTEM + _hints(task)}, *(history or []),
                     {"role": "user", "content": task}]
-        schemas = [t.schema() for t in registry.all_tools() if self.user.may_use_tool(t.name)]
+        schemas = self.tools_for(task)
+        calls: list[dict] = []
         for _ in range(config.MAX_STEPS):
             msg = self.llm.chat(messages, schemas)
             messages.append(msg)
-            calls = msg.get("tool_calls") or []
-            if not calls:
+            batch = msg.get("tool_calls") or []
+            if not batch:
+                ok = bool(calls) and calls[-1]["ok"]
+                learning.record_task(self.user.name, task, calls, ok)
                 return msg.get("content", "")
-            for c in calls:
+            for c in batch:
                 fn = c["function"]
                 name, args = fn["name"], fn.get("arguments") or {}
                 if isinstance(args, str):
@@ -58,7 +76,10 @@ class Agent:
                 self.on_event("tool_call", {"name": name, "args": args})
                 result = self._execute(name, args)
                 self.on_event("tool_result", {"name": name, "result": result})
+                calls.append({"name": name, "args": args,
+                              "ok": not (isinstance(result, dict) and "error" in result)})
                 messages.append({"role": "tool", "name": name, "content": _shorten(result)})
+        learning.record_task(self.user.name, task, calls, False)
         return "Parei: limite de passos atingido sem concluir a tarefa."
 
     def _execute(self, name: str, args: dict):

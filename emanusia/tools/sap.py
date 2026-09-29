@@ -13,7 +13,9 @@ def _get_session():
     if _session is None:
         if sys.platform != "win32":
             raise RuntimeError("SAP GUI Scripting só está disponível no Windows.")
+        import pythoncom
         import win32com.client
+        pythoncom.CoInitialize()  # COM precisa ser inicializado na thread do worker
         engine = win32com.client.GetObject("SAPGUI").GetScriptingEngine
         _session = engine.Children(0).Children(0)
     return _session

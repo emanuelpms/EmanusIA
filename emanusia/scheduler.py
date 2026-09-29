@@ -44,10 +44,14 @@ def list_schedules() -> list[dict]:
         return _load()
 
 
-def add_schedule(workflow: str, when: dict, params: dict | None = None, owner: str = "local",
-                 unattended: bool = False, now: datetime | None = None) -> dict:
+def add_schedule(workflow: str | None, when: dict, params: dict | None = None, owner: str = "local",
+                 unattended: bool = False, now: datetime | None = None, bot: str | None = None) -> dict:
+    """Agenda um workflow OU um bot (bot precisa estar ativo na hora de rodar)."""
+    if not (workflow or bot):
+        raise ValueError("informe workflow ou bot")
     now = now or datetime.now()
-    item = {"id": uuid.uuid4().hex[:8], "workflow": workflow, "when": when, "params": params or {},
+    item = {"id": uuid.uuid4().hex[:8], "workflow": workflow, "bot": bot, "when": when,
+            "params": params or {},
             "owner": owner, "unattended": unattended, "enabled": True,
             "next_run": next_run(when, now).isoformat(timespec="seconds"),
             "last_run": None, "last_status": None}

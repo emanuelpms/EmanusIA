@@ -2,13 +2,11 @@ import argparse
 import json
 import sys
 
-import yaml
-
 from . import config
 from .agent import Agent
 from .llm import OllamaClient
 from .tools import load_all
-from .tools.workflow import _path, run_steps
+from .tools.workflow import load_workflow, run_steps
 
 
 def _confirm(name: str, args: dict) -> bool:
@@ -30,8 +28,15 @@ def main(argv=None):
     w = sub.add_parser("workflow", help="roda uma automação salva (sem LLM)")
     w.add_argument("name")
     w.add_argument("-p", "--param", action="append", default=[], help="chave=valor")
-    s = sub.add_parser("serve", help="API + interface web local (sem abrir janela)")
+    s = sub.add_parser("serve", help="API + interface web (sem abrir janela)")
     s.add_argument("--port", type=int, default=8765)
+    s.add_argument("--lan", action="store_true",
+                   help="libera acesso pela rede para a equipe (exige usuários cadastrados)")
+    b = sub.add_parser("bot", help="gerencia bots")
+    b.add_argument("action", choices=["list", "validate", "run", "activate", "pause"])
+    b.add_argument("id", nargs="?")
+    b.add_argument("-p", "--param", action="append", default=[], help="chave=valor")
+    sub.add_parser("demo", help="cria uma empresa de exemplo com bots para ver o escritório")
     g = sub.add_parser("gui", help="abre a interface gráfica (janela nativa ou navegador)")
     g.add_argument("--port", type=int, default=8765)
     rec = sub.add_parser("record", help="grava uma automação web usando o navegador")
@@ -73,11 +78,45 @@ def main(argv=None):
                           a.tools.split(",") if a.tools else None)
             print("Usuário criado. A GUI passa a exigir login.")
     elif a.cmd == "serve":
+        import os
         import uvicorn
-        uvicorn.run("emanusia.api:app", host="127.0.0.1", port=a.port)
+        from . import auth
+        if a.lan:
+            if not auth.auth_enabled():
+                print("Modo LAN exige login. Crie o admin: emanusia user add admin --role admin")
+                return 1
+            os.environ["EMANUSIA_LAN"] = "1"
+            print(f"Equipe acessa em http://<ip-deste-pc>:{a.port}/ (escritório em /office). "
+                  "Libere a porta no Firewall do Windows. Tráfego sem HTTPS: use só em rede interna.")
+        uvicorn.run("emanusia.api:app", host="0.0.0.0" if a.lan else "127.0.0.1", port=a.port)
+    elif a.cmd == "demo":
+        load_all()
+        from .demo import seed
+        made = seed()
+        print(f"{len(made)} bots criados. Rode `emanusia gui` e abra a aba Escritório.")
+    elif a.cmd == "bot":
+        load_all()
+        from . import auth, bots
+        user = auth.LOCAL_ADMIN
+        if a.action == "list":
+            for bt in bots.list_bots():
+                print(f"{bt.id:28} {bt.status:10} {bt.team:14} {bt.role:7} {bt.name}")
+        elif a.action == "validate":
+            rep = bots.validate_bot(a.id, user)
+            print("OK" if rep["ok"] else "ERROS:\n- " + "\n- ".join(rep["errors"]))
+            for w_ in rep["warnings"]:
+                print("aviso:", w_)
+        elif a.action in ("activate", "pause"):
+            print(bots.set_active(a.id, user, a.action == "activate").status)
+        else:
+            bt = bots.get_bot(a.id)
+            bots.ensure_runnable(bt, user)
+            params = dict(p.split("=", 1) for p in a.param)
+            res = run_steps({**bt.code, "name": ""}, params, confirm=_confirm, user=user, bot=bt.id)
+            print(json.dumps(res, ensure_ascii=False, indent=2, default=str))
     elif a.cmd == "workflow":
         load_all()
-        wf = yaml.safe_load(_path(a.name).read_text(encoding="utf-8"))
+        wf = load_workflow(a.name)
         params = dict(p.split("=", 1) for p in a.param)
         print(json.dumps(run_steps(wf, params, confirm=_confirm), ensure_ascii=False, indent=2))
     else:

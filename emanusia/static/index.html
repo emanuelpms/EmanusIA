@@ -11,7 +11,7 @@ nav{width:220px;background:var(--side);border-right:1px solid var(--line);paddin
 nav h1{font-size:19px;margin:0 8px 14px}nav button{all:unset;cursor:pointer;padding:9px 12px;border-radius:9px;color:var(--mut)}
 nav button:hover{background:var(--line)}nav button.on{background:var(--acc);color:#fff}nav .sp{flex:1}
 nav .who{font-size:12px;color:var(--mut);padding:6px 10px}
-main{flex:1;overflow:auto;padding:24px 28px}h2{margin:0 0 16px}
+main{flex:1;overflow:auto;padding:24px 28px}main.full{padding:0;overflow:hidden}main.full iframe{border:0;width:100%;height:100%;display:block}h2{margin:0 0 16px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:12px}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
 button.b,a.b{all:unset;cursor:pointer;background:var(--acc);color:#fff;padding:7px 14px;border-radius:9px;font-size:14px;display:inline-block}
@@ -49,8 +49,8 @@ async function api(path, method='GET', body) {
   return j;
 }
 const toast = m => alert(m);
-let ME = null, TAB = 'chat', HISTORY = [], ACTIVE = null;
-const TABS = [['chat','💬 Chat'],['flows','⚙️ Automações'],['jobs','📋 Tarefas'],['sched','⏰ Agendamentos'],['files','📁 Arquivos'],['admin','👥 Admin'],['cfg','🔧 Ajustes']];
+let ME = null, TAB = 'office', HISTORY = [], ACTIVE = null;
+const TABS = [['office','🏢 Escritório'],['chat','💬 Chat'],['bots','🤖 Bots'],['learn','💡 Aprendizado'],['creds','🔑 Acessos'],['flows','⚙️ Automações'],['jobs','📋 Tarefas'],['sched','⏰ Agendamentos'],['files','📁 Arquivos'],['admin','👥 Admin'],['cfg','🔧 Ajustes']];
 
 function modal(html) { $('#mbody').innerHTML = html; $('#modal').classList.add('show'); }
 function closeModal() { $('#modal').classList.remove('show'); }
@@ -81,7 +81,8 @@ async function logout() { await api('/api/logout','POST'); location.reload(); }
 function go(t) {
   TAB = t;
   document.querySelectorAll('nav button[data-t]').forEach(b => b.classList.toggle('on', b.dataset.t === t));
-  ({chat: viewChat, flows: viewFlows, jobs: viewJobs, sched: viewSched, files: viewFiles, admin: viewAdmin, cfg: viewCfg})[t]();
+  document.querySelector('main').classList.toggle('full', t === 'office');
+  ({creds: viewCreds, office: viewOffice, bots: viewBots, learn: viewLearn, chat: viewChat, flows: viewFlows, jobs: viewJobs, sched: viewSched, files: viewFiles, admin: viewAdmin, cfg: viewCfg})[t]();
 }
 const readonly = () => ME.user.role === 'viewer';
 
@@ -184,28 +185,28 @@ async function saveFlow(name) {
 async function delFlow(name) { if (confirm('Excluir ' + name + '?')) { await api('/api/workflows/' + name, 'DELETE'); closeModal(); viewFlows(); } }
 
 /* ---------- Agendamentos ---------- */
-function schedFlow(name) {
-  modal(`<h2>Agendar ${esc(name)}</h2><label>Tipo</label>
+function schedFlow(name, kind = 'workflow') {
+  modal(`<h2>Agendar ${kind === 'bot' ? '🤖 ' : ''}${esc(name)}</h2><label>Tipo</label>
   <select id="st" onchange="document.getElementById('sd').style.display=this.value=='d'?'block':'none'"><option value="e">A cada N minutos</option><option value="d">Diário em horário fixo</option></select>
   <label>Minutos (intervalo)</label><input id="sm" type="number" value="60" min="1">
   <div id="sd" style="display:none"><label>Horário</label><input id="sh" type="time" value="08:00">
   <label>Dias</label><div class="row">${['Seg','Ter','Qua','Qui','Sex','Sáb','Dom'].map((d,i) => `<label style="margin:0"><input type="checkbox" class="day" value="${i}" ${i<5?'checked':''} style="width:auto"> ${d}</label>`).join('')}</div></div>
   ${ME.user.role === 'admin' ? '<label><input type="checkbox" id="su" style="width:auto"> Executar sem supervisão (autoriza ações de risco automaticamente)</label>' : '<p class="mut small">Ações de risco serão negadas nas execuções agendadas.</p>'}
-  <p><button class="b" onclick='doSched(${JSON.stringify(name)})'>Agendar</button></p>`);
+  <p><button class="b" onclick='doSched(${JSON.stringify(name)}, ${JSON.stringify(kind)})'>Agendar</button></p>`);
 }
-async function doSched(name) {
+async function doSched(name, kind = 'workflow') {
   const when = $('#st').value === 'e' ? {every_minutes: +$('#sm').value}
     : {daily_at: $('#sh').value, days: [...document.querySelectorAll('.day:checked')].map(c => +c.value)};
-  try { await api('/api/schedules', 'POST', {workflow: name, when, unattended: !!($('#su') && $('#su').checked)}); closeModal(); go('sched'); }
+  try { await api('/api/schedules', 'POST', {[kind]: name, when, unattended: !!($('#su') && $('#su').checked)}); closeModal(); go('sched'); }
   catch (e) { toast(e.message); }
 }
 async function viewSched() {
   const s = await api('/api/schedules');
   $('#main').innerHTML = `<h2>Agendamentos</h2><div class="card"><table><tr><th>Automação</th><th>Quando</th><th>Próxima</th><th>Último</th><th>Dono</th><th></th></tr>
-  ${s.map(i => `<tr><td>${esc(i.workflow)}${i.unattended ? ' <span class="tag">sem supervisão</span>' : ''}</td>
+  ${s.map(i => `<tr><td>${i.bot ? '🤖 ' + esc(i.bot) : esc(i.workflow)}${i.unattended ? ' <span class="tag">sem supervisão</span>' : ''}</td>
   <td>${esc(i.when.every_minutes ? 'a cada ' + i.when.every_minutes + ' min' : i.when.daily_at)}</td><td>${esc(i.next_run.replace('T',' '))}</td>
   <td class="small">${esc(i.last_status || '—')}</td><td>${esc(i.owner)}</td>
-  <td class="row"><button class="b sec" onclick="togSched('${i.id}',${!i.enabled})">${i.enabled ? 'Pausar' : 'Ativar'}</button><button class="b bad" onclick="delSched('${i.id}')">✕</button></td></tr>`).join('') || '<tr><td colspan=6 class="mut">Nada agendado. Agende pela aba Automações (⏰).</td></tr>'}</table></div>`;
+  <td class="row"><button class="b sec" onclick="togSched('${i.id}',${!i.enabled})">${i.enabled ? 'Pausar' : 'Ativar'}</button><button class="b bad" onclick="delSched('${i.id}')">✕</button></td></tr>`).join('') || '<tr><td colspan=6 class="mut">Nada agendado. Agende pelas abas Bots ou Automações (⏰).</td></tr>'}</table></div>`;
 }
 async function togSched(id, en) { await api(`/api/schedules/${id}/toggle`, 'POST', {enabled: en}); viewSched(); }
 async function delSched(id) { await api('/api/schedules/' + id, 'DELETE'); viewSched(); }
@@ -251,21 +252,204 @@ async function addUser() {
 }
 async function delUser(n) { if (confirm('Remover ' + n + '?')) { try { await api('/api/users/' + n, 'DELETE'); viewAdmin(); } catch (e) { toast(e.message); } } }
 
+/* ---------- Escritório ---------- */
+function viewOffice() { $('#main').innerHTML = '<iframe src="/office" title="Escritório"></iframe>'; }
+
+/* ---------- Bots ---------- */
+const STATUS = {draft: ['rascunho', 'queued'], validated: ['validado', 'running'], active: ['ativo', 'done'], paused: ['pausado', '']};
+async function viewBots() {
+  const [bs, wfs] = await Promise.all([api('/api/bots'), api('/api/workflows')]);
+  const teams = [...new Set(bs.map(b => b.team))];
+  $('#main').innerHTML = `<h2>Bots</h2>
+  ${readonly() ? '' : `<div class="card"><b>✨ Contratar um bot</b>
+   <p class="mut small">Descreva o trabalho em português: a IA escreve o código do bot, o sistema valida e corrige até ficar válido. Você revisa antes de ativar.</p>
+   <div class="row"><input id="bn" placeholder="Nome (ex.: Conciliador Bancário)" style="flex:2">
+   <input id="bt" placeholder="Time (ex.: Financeiro)" list="teams" style="flex:1"><datalist id="teams">${teams.map(t => `<option>${esc(t)}`).join('')}</datalist>
+   <select id="br" style="flex:0 0 130px"><option value="worker">Funcionário</option><option value="boss">Chefe</option></select></div>
+   <label>O que ele faz?</label><textarea id="bd" rows="3" placeholder="Ex.: todo dia entra no portal do banco, baixa o extrato, cruza com a planilha contas.xlsx e manda as diferenças por e-mail para o financeiro"></textarea>
+   <div class="row" style="margin-top:8px"><button class="b" id="bgen" onclick="genBot()">✨ Gerar código com IA</button>
+   <button class="b sec" onclick="newBot()">Escrever do zero</button>
+   <select id="bw" style="flex:0 1 240px"><option value="">…ou partir de uma automação</option>${wfs.map(w => `<option>${esc(w.name)}</option>`).join('')}</select></div></div>`}
+  <div class="grid">${bs.map(b => { const [st, cls] = STATUS[b.status] || [b.status, ''];
+    return `<div class="card"><div class="row"><span style="width:12px;height:12px;border-radius:3px;background:${esc(b.color)};display:inline-block"></span>
+    <b>${esc(b.name)}</b> <span class="tag ${cls}">${st}</span></div>
+    <div class="mut small">${b.role === 'boss' ? '👔 chefe' : '🤖 funcionário'} · ${esc(b.team)} · dono: ${esc(b.owner)}${b.origin !== 'manual' ? ' · origem: ' + esc(b.origin) : ''}</div>
+    <div class="small" style="margin:6px 0">${esc(b.description) || '—'}</div>
+    <div class="mut small">execuções ${b.stats.runs} · ok ${b.stats.ok} · erros ${b.stats.errors}${b.stats.last_run ? ' · última ' + esc(b.stats.last_run) : ''}</div>
+    ${b.validation && b.validation.errors && b.validation.errors.length ? `<div class="small" style="color:var(--bad)">⚠ ${b.validation.errors.length} erro(s) de validação</div>` : ''}
+    ${b.validation && b.validation.risky_tools && b.validation.risky_tools.length ? `<div class="small" style="color:var(--warn)">pede autorização: ${esc(b.validation.risky_tools.join(', '))}</div>` : ''}
+    <div class="row" style="margin-top:8px">
+      <button class="b" ${readonly() || b.status === 'draft' || (b.status !== 'active' && !b.can_edit) ? 'disabled' : ''} onclick='runBot(${JSON.stringify(b.id)})'>▶ Executar</button>
+      ${b.can_edit ? `<button class="b sec" onclick='editBot(${JSON.stringify(b.id)})'>Código</button>
+      ${b.status === 'draft' ? `<button class="b sec" onclick='validateBot(${JSON.stringify(b.id)})'>✔ Validar</button>` : ''}
+      ${b.status === 'validated' || b.status === 'paused' ? `<button class="b sec" onclick='activeBot(${JSON.stringify(b.id)},true)'>Ativar</button>` : ''}
+      ${b.status === 'active' ? `<button class="b sec" onclick='activeBot(${JSON.stringify(b.id)},false)'>Pausar</button>
+        <button class="b sec" onclick='schedFlow(${JSON.stringify(b.id)},"bot")'>⏰</button>` : ''}` : ''}
+    </div></div>`; }).join('') || '<p class="mut">Nenhum bot ainda. Contrate o primeiro acima (ou rode <code>emanusia demo</code> para ver um exemplo).</p>'}</div>`;
+  if ($('#bw')) $('#bw').onchange = async e => { if (!e.target.value) return; const y = (await api('/api/workflows/' + e.target.value)).yaml; botEditor(null, y); };
+}
+function newBot() { botEditor(null, 'params: {}\nsteps:\n  - log: "olá, sou um bot novo"\n'); }
+async function genBot() {
+  const d = $('#bd').value.trim(); if (!$('#bn').value.trim()) return toast('Dê um nome ao bot.');
+  $('#bgen').disabled = true; $('#bgen').textContent = '⏳ Escrevendo o código...';
+  try {
+    const j0 = await api('/api/bots/generate', 'POST', {description: d});
+    const j = await follow(j0.id, () => {});
+    if (j.status === 'error') throw new Error(j.result);
+    botEditor(null, j.result.yaml, j.result.validation, `Gerado em ${j.result.attempts} tentativa(s).`, 'ia');
+  } catch (e) { toast(e.message); }
+  if ($('#bgen')) { $('#bgen').disabled = false; $('#bgen').textContent = '✨ Gerar código com IA'; }
+}
+async function editBot(id) { const b = await api('/api/bots/' + id); botEditor(b, b.yaml, b.validation); }
+function report(r) {
+  if (!r) return '';
+  return `<div class="small" style="margin-top:8px">${r.ok ? '<span style="color:var(--ok)">✔ Código válido</span>' : '<span style="color:var(--bad)">✖ Código com erros</span>'}
+  ${(r.errors || []).map(e => `<div style="color:var(--bad)">• ${esc(e)}</div>`).join('')}
+  ${(r.warnings || []).map(e => `<div style="color:var(--warn)">• ${esc(e)}</div>`).join('')}
+  ${(r.risky_tools || []).length ? `<div class="mut">Ações que vão pedir autorização: ${esc(r.risky_tools.join(', '))}</div>` : ''}</div>`;
+}
+function botEditor(b, yaml, rep, note = '', origin = 'manual') {
+  const n = b ? b.name : ($('#bn') ? $('#bn').value : ''), t = b ? b.team : ($('#bt') ? $('#bt').value : ''), r = b ? b.role : ($('#br') ? $('#br').value : 'worker');
+  const d = b ? b.description : ($('#bd') ? $('#bd').value : '');
+  modal(`<h2>${b ? 'Código de ' + esc(b.name) : 'Novo bot'}</h2>${note ? `<p class="mut small">${esc(note)}</p>` : ''}
+  <div class="row"><input id="en" value="${esc(n)}" placeholder="Nome" ${b ? 'disabled' : ''} style="flex:2"><input id="et" value="${esc(t)}" placeholder="Time" style="flex:1">
+  <select id="er" style="flex:0 0 130px"><option value="worker" ${r === 'worker' ? 'selected' : ''}>Funcionário</option><option value="boss" ${r === 'boss' ? 'selected' : ''}>Chefe</option></select></div>
+  <label>Descrição</label><input id="ed" value="${esc(d)}">
+  <label>Código (YAML) — validado automaticamente enquanto você edita</label><textarea id="ey" rows="16">${esc(yaml)}</textarea>
+  <div id="erep">${report(rep)}</div>
+  <div class="row" style="margin-top:12px"><button class="b" onclick='saveBot(${JSON.stringify(b ? b.id : null)}, ${JSON.stringify(origin)})'>Salvar e validar</button>
+  ${b ? `<button class="b bad" onclick='delBot(${JSON.stringify(b.id)})'>Excluir bot</button>` : ''}
+  <span class="mut small">Salvar volta o bot para rascunho até passar na validação.</span></div>`);
+  let tm; $('#ey').addEventListener('input', () => { clearTimeout(tm); tm = setTimeout(async () => { $('#erep').innerHTML = report(await api('/api/validate', 'POST', {yaml: $('#ey').value})); }, 500); });
+}
+async function saveBot(id, origin) {
+  const body = {team: $('#et').value, role: $('#er').value, description: $('#ed').value, yaml: $('#ey').value};
+  try {
+    const b = id ? await api('/api/bots/' + id, 'PUT', body) : await api('/api/bots', 'POST', {...body, name: $('#en').value, origin});
+    const rep = await api(`/api/bots/${b.id}/validate`, 'POST');
+    if (rep.ok) { closeModal(); toast(`Bot "${b.name}" validado! Agora é só ativar.`); viewBots(); }
+    else { $('#erep').innerHTML = report(rep); if (!id) { closeModal(); viewBots(); toast('Bot salvo como rascunho: corrija os erros em "Código".'); } }
+  } catch (e) { toast(e.message); }
+}
+async function validateBot(id) { const r = await api(`/api/bots/${id}/validate`, 'POST'); toast(r.ok ? 'Validado!' : 'Erros:\n- ' + r.errors.join('\n- ')); viewBots(); }
+async function activeBot(id, on) { try { await api(`/api/bots/${id}/active`, 'POST', {active: on}); viewBots(); } catch (e) { toast(e.message); } }
+async function delBot(id) { if (confirm('Demitir este bot?')) { await api('/api/bots/' + id, 'DELETE'); closeModal(); viewBots(); } }
+function runBot(id) {
+  modal(`<h2>Executar bot</h2><label>Parâmetros (JSON, opcional)</label><textarea id="rp" rows="3">{}</textarea>
+  <label>Ações de risco</label><select id="risk"><option value="">Perguntar a cada ação</option><option value="true">Autorizar todas desta execução</option><option value="false">Negar todas</option></select>
+  <p><button class="b" onclick='doRunBot(${JSON.stringify(id)})'>▶ Executar</button></p>`);
+}
+async function doRunBot(id) {
+  let params; try { params = JSON.parse($('#rp').value || '{}'); } catch { return toast('Parâmetros: JSON inválido'); }
+  const r = $('#risk').value; closeModal();
+  try { const j = await api(`/api/bots/${id}/run`, 'POST', {params, approve_risky: r === '' ? null : r === 'true'}); go('office'); follow(j.id, () => {}); }
+  catch (e) { toast(e.message); }
+}
+
+/* ---------- Acessos (cofre) ---------- */
+const KIND = {web: '🌐 Site', sap: '🟦 SAP', desktop: '🖥 Programa', api: '🔌 API', other: '🔐 Outro'};
+async function viewCreds() {
+  const cs = await api('/api/credentials');
+  $('#main').innerHTML = `<h2>Meus acessos</h2>
+  <div class="card small mut">Cadastre aqui o <b>seu</b> login de cada sistema. Os bots usam só o <b>nome</b> do acesso
+  (ex.: <code>web_login: portal-fornecedor</code>) e, ao rodar, pegam o login de quem está executando — cada pessoa da equipe usa o próprio usuário.
+  As senhas ficam criptografadas neste computador e nunca aparecem na tela, nos logs nem para a IA.</div>
+  ${readonly() ? '' : '<p><button class="b" onclick="editCred()">+ Novo acesso</button></p>'}
+  <div class="card"><table><tr><th>Nome</th><th>Sistema</th><th>Usuário</th><th>Endereço</th><th>Atualizado</th><th></th></tr>
+  ${cs.map(c => `<tr><td><code>${esc(c.name)}</code>${c.shared ? ' <span class="tag">compartilhado</span>' : ''}<div class="small mut">${esc(c.label)}</div></td>
+   <td>${KIND[c.kind] || esc(c.kind)}</td><td>${esc(c.username)} <span class="mut">••••••</span></td><td class="small">${esc(c.url)}</td>
+   <td class="small mut">${esc(c.updated)}</td><td class="row">${readonly() || (c.shared && ME.user.role !== 'admin') ? '' :
+   `<button class="b sec" onclick='editCred(${JSON.stringify(c)})'>Editar</button><button class="b bad" onclick='delCred(${JSON.stringify(c.name)}, ${c.shared})'>✕</button>`}</td></tr>`).join('')
+   || '<tr><td colspan=6 class="mut">Nenhum acesso cadastrado.</td></tr>'}</table></div>`;
+}
+function editCred(c) {
+  c = c || {name: '', label: '', kind: 'web', url: '', username: '', extra: {}, shared: false};
+  const x = c.extra || {};
+  modal(`<h2>${c.name ? 'Editar acesso' : 'Novo acesso'}</h2>
+  <div class="row"><div style="flex:1"><label>Nome (usado pelos bots)</label><input id="cn" value="${esc(c.name)}" placeholder="portal-fornecedor" ${c.name ? 'disabled' : ''}></div>
+  <div style="flex:1"><label>Tipo</label><select id="ck">${Object.entries(KIND).map(([k, v]) => `<option value="${k}" ${k === c.kind ? 'selected' : ''}>${v}</option>`).join('')}</select></div></div>
+  <label>Descrição</label><input id="cl" value="${esc(c.label)}" placeholder="Portal do fornecedor X">
+  <label>Endereço (URL / servidor)</label><input id="cu" value="${esc(c.url)}" placeholder="https://portal.fornecedor.com/login">
+  <div class="row"><div style="flex:1"><label>Usuário</label><input id="cus" value="${esc(c.username)}" autocomplete="off"></div>
+  <div style="flex:1"><label>Senha ${c.name ? '(vazio = manter)' : ''}</label><input id="cp" type="password" autocomplete="new-password"></div></div>
+  <details style="margin-top:10px"><summary class="small mut">Avançado (site com login diferente, SAP)</summary>
+   <div class="row"><input id="xu" value="${esc(x.user_selector || '')}" placeholder="seletor do usuário"><input id="xp" value="${esc(x.pass_selector || '')}" placeholder="seletor da senha"></div>
+   <div class="row" style="margin-top:6px"><input id="xs" value="${esc(x.submit_selector || '')}" placeholder="seletor do botão entrar"><input id="xok" value="${esc(x.success_selector || '')}" placeholder="seletor que aparece após logar"></div>
+   <div class="row" style="margin-top:6px"><input id="xse" value="${esc(x.session || '')}" placeholder="salvar sessão como (reusa cookies/MFA)"><input id="xc" value="${esc(x.client || '')}" placeholder="SAP: mandante"><input id="xl" value="${esc(x.language || '')}" placeholder="SAP: idioma (PT)"></div></details>
+  ${ME.user.role === 'admin' ? `<label><input type="checkbox" id="csh" style="width:auto" ${c.shared ? 'checked' : ''} ${c.name ? 'disabled' : ''}> Compartilhado (conta de serviço para quem não tiver acesso próprio)</label>` : ''}
+  <p><button class="b" onclick="saveCred(${c.name ? 'true' : 'false'})">Salvar</button></p>`);
+}
+async function saveCred(editing) {
+  const extra = {user_selector: $('#xu').value, pass_selector: $('#xp').value, submit_selector: $('#xs').value, success_selector: $('#xok').value,
+    session: $('#xse').value, client: $('#xc').value, language: $('#xl').value};
+  const pw = $('#cp').value;
+  try { await api('/api/credentials/' + encodeURIComponent($('#cn').value.trim()), 'PUT', {label: $('#cl').value, kind: $('#ck').value, url: $('#cu').value,
+      username: $('#cus').value, password: pw ? pw : (editing ? null : ''), extra, shared: !!($('#csh') && $('#csh').checked)});
+    closeModal(); viewCreds(); } catch (e) { toast(e.message); }
+}
+async function delCred(n, shared) { if (confirm('Remover o acesso ' + n + '?')) { await api(`/api/credentials/${encodeURIComponent(n)}?shared=${shared}`, 'DELETE'); viewCreds(); } }
+
+/* ---------- Aprendizado ---------- */
+async function viewLearn() {
+  const [sg, st, c] = await Promise.all([api('/api/suggestions'), api('/api/learning'), api('/api/config')]);
+  $('#main').innerHTML = `<h2>Aprendizado</h2>
+  <div class="card"><b>Como o robô aprende</b><p class="small mut">Cada tarefa que você resolve no Chat vira experiência: as parecidas ajudam as próximas respostas,
+  e quando a mesma rotina se repete ${esc(c.settings.suggest_min_repeats)}× o sistema propõe um bot pronto — os valores que mudam viram parâmetros.</p>
+  <div class="row small"><span>Tarefas registradas: <b>${st.tasks}</b></span><span>Bem-sucedidas: <b>${st.success}</b></span>
+  <span>Auto-criação de bots: <b>${c.settings.auto_create_bots ? 'ligada (cria rascunhos)' : 'desligada'}</b> <span class="mut">(Ajustes)</span></span></div></div>
+  <h3>💡 Bots sugeridos</h3>
+  <div class="grid">${sg.map(s => `<div class="card"><b>${esc(s.name)}</b> <span class="tag">${s.count}× repetido</span>
+    <div class="small" style="margin:6px 0">"${esc(s.title)}"</div><div class="mut small">${s.tools.map(esc).join(' → ')}</div>
+    <pre>${esc(s.yaml)}</pre>
+    <div class="row"><input id="sn-${s.id}" value="${esc(s.name)}" style="flex:2"><input id="st-${s.id}" value="Geral" style="flex:1"></div>
+    <div class="row" style="margin-top:8px"><button class="b" ${readonly() ? 'disabled' : ''} onclick="acceptSug('${s.id}')">Contratar este bot</button>
+    <button class="b sec" ${readonly() ? 'disabled' : ''} onclick="dismissSug('${s.id}')">Dispensar</button></div></div>`).join('')
+    || '<p class="mut">Nenhuma rotina repetida ainda. Use o Chat no dia a dia: o robô observa e sugere bots aqui.</p>'}</div>
+  <h3>Últimas tarefas aprendidas</h3><div class="card"><table>${st.recent.map(r => `<tr><td class="small">${esc(r.ts)}</td><td>${r.success ? '✔' : '✖'}</td>
+  <td>${esc(r.task)}</td><td class="small mut">${r.tools.map(esc).join(' → ')}</td></tr>`).join('') || '<tr><td class="mut">—</td></tr>'}</table></div>`;
+}
+async function acceptSug(id) {
+  try { const b = await api(`/api/suggestions/${id}/accept`, 'POST', {name: $('#sn-' + id).value, team: $('#st-' + id).value});
+    toast(`Bot "${b.name}" contratado (${b.status === 'validated' ? 'validado — ative na aba Bots' : 'rascunho: revise o código'}).`); viewLearn(); } catch (e) { toast(e.message); }
+}
+async function dismissSug(id) { await api(`/api/suggestions/${id}/dismiss`, 'POST'); viewLearn(); }
+
 /* ---------- Ajustes ---------- */
 async function viewCfg() {
   const [c, tools] = await Promise.all([api('/api/config'), api('/api/tools')]);
+  const S = c.settings, adm = ME.user.role === 'admin', dis = adm ? '' : 'disabled';
   const opts = (sel) => [...new Set([sel, ...c.installed_models])].map(m => `<option ${m === sel ? 'selected' : ''}>${esc(m)}</option>`).join('');
   $('#main').innerHTML = `<h2>Ajustes</h2>
+  <div class="card"><b>Empresa</b><label>Nome (aparece no escritório)</label><input id="cc" value="${esc(S.company_name)}" ${dis}></div>
   <div class="card"><b>Modelos (Ollama)</b>
   ${c.installed_models.length ? '' : '<p class="small" style="color:var(--warn)">Ollama não respondeu. Instale em ollama.com e rode: <code>ollama pull qwen2.5:7b</code> e <code>ollama pull qwen2.5vl:3b</code></p>'}
-  <label>Modelo de raciocínio/ferramentas</label><select id="cm">${opts(c.settings.model)}</select>
-  <label>Modelo de visão</label><select id="cv">${opts(c.settings.vision_model)}</select>
-  <p><button class="b" ${ME.user.role === 'admin' ? '' : 'disabled'} onclick="saveCfg()">Salvar</button></p>
-  <p class="mut small">Workspace (onde o robô lê/escreve): ${esc(c.workspace)}</p></div>
+  <label>Modelo de raciocínio/ferramentas</label><select id="cm" ${dis}>${opts(S.model)}</select>
+  <label>Modelo de visão</label><select id="cv" ${dis}>${opts(S.vision_model)}</select></div>
+  <div class="card"><b>E-mail</b>
+  <label>Provedor</label><select id="ep" ${dis} onchange="document.getElementById('smtp').style.display=this.value==='smtp'?'block':'none'">
+    <option value="outlook" ${S.email_provider === 'outlook' ? 'selected' : ''}>Outlook instalado (padrão — usa a conta já logada no Windows)</option>
+    <option value="smtp" ${S.email_provider === 'smtp' ? 'selected' : ''}>SMTP / IMAP</option></select>
+  <div id="smtp" style="display:${S.email_provider === 'smtp' ? 'block' : 'none'}">
+    <div class="row"><div style="flex:3"><label>Servidor SMTP</label><input id="sh2" value="${esc(S.smtp_host)}" placeholder="smtp.office365.com" ${dis}></div>
+    <div style="flex:1"><label>Porta</label><input id="sp" type="number" value="${esc(S.smtp_port)}" ${dis}></div></div>
+    <div class="row"><div style="flex:1"><label>Usuário</label><input id="su2" value="${esc(S.smtp_user)}" ${dis}></div>
+    <div style="flex:1"><label>Remetente (opcional)</label><input id="sf" value="${esc(S.smtp_from)}" ${dis}></div></div>
+    <div class="row"><div style="flex:1"><label>Servidor IMAP (leitura)</label><input id="ih" value="${esc(S.imap_host)}" placeholder="outlook.office365.com" ${dis}></div>
+    <div style="flex:1"><label>Usuário IMAP (vazio = mesmo do SMTP)</label><input id="iu" value="${esc(S.imap_user)}" ${dis}></div></div>
+    <p class="mut small">🔒 Senhas não ficam salvas no sistema: defina as variáveis de ambiente <code>EMAIL_SMTP_PASS</code> e <code>EMAIL_IMAP_PASS</code> no Windows.</p></div></div>
+  <div class="card"><b>Aprendizado</b>
+  <label><input type="checkbox" id="ac" style="width:auto" ${S.auto_create_bots ? 'checked' : ''} ${dis}> Criar bots automaticamente quando uma rotina se repetir (entram como rascunho validado; um humano ativa)</label>
+  <label>Repetições para sugerir um bot</label><input id="mr" type="number" min="2" value="${esc(S.suggest_min_repeats)}" ${dis} style="max-width:120px"></div>
+  <p><button class="b" ${dis} onclick="saveCfg()">Salvar ajustes</button> <span class="mut small">${adm ? '' : 'Somente admin altera ajustes.'}</span></p>
   <div class="card"><b>Ferramentas disponíveis</b> <span class="mut small">(⚠️ = pede autorização)</span>
-  <table>${tools.map(t => `<tr style="${t.allowed ? '' : 'opacity:.4'}"><td><code>${esc(t.name)}</code> ${t.risky ? '⚠️' : ''}</td><td class="small">${esc(t.description)}</td></tr>`).join('')}</table></div>`;
+  <table>${tools.map(t => `<tr style="${t.allowed ? '' : 'opacity:.4'}"><td><code>${esc(t.name)}</code> ${t.risky ? '⚠️' : ''}</td><td class="small mut">${esc(t.group)}</td><td class="small">${esc(t.description)}<br><span class="mut">args: ${esc(t.args.join(', ') || '—')}</span></td></tr>`).join('')}</table></div>`;
 }
-async function saveCfg() { try { await api('/api/settings', 'POST', {model: $('#cm').value, vision_model: $('#cv').value}); toast('Salvo.'); } catch (e) { toast(e.message); } }
+async function saveCfg() {
+  try { await api('/api/settings', 'POST', {company_name: $('#cc').value, model: $('#cm').value, vision_model: $('#cv').value, email_provider: $('#ep').value,
+      smtp_host: $('#sh2').value, smtp_port: +$('#sp').value || 587, smtp_user: $('#su2').value, smtp_from: $('#sf').value, imap_host: $('#ih').value,
+      imap_user: $('#iu').value, auto_create_bots: $('#ac').checked, suggest_min_repeats: +$('#mr').value || 3});
+    toast('Salvo.'); } catch (e) { toast(e.message); }
+}
 
 boot();
 </script>

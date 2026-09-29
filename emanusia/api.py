@@ -1,6 +1,9 @@
-"""API local da GUI. Só escuta em 127.0.0.1; sessão por cookie HttpOnly/SameSite=Strict;
-valida o header Host (anti DNS-rebinding); arquivos do workspace são servidos em sandbox."""
+"""API da GUI. Padrão: só 127.0.0.1, com checagem do header Host (anti DNS-rebinding).
+Modo LAN (EMANUSIA_LAN=1 / `emanusia serve --lan`): a equipe acessa pela rede; exige usuários
+cadastrados (login obrigatório). Sessão por cookie HttpOnly/SameSite=Strict; arquivos do
+workspace são servidos em sandbox."""
 import os
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -9,11 +12,14 @@ from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
-from . import auth, config, scheduler
+from . import auth, bots, config, events, learning, scheduler, vault
+from .engine import validate
 from .jobs import JobManager
 from .llm import OllamaClient
 from .tools import registry
 from .tools.workflow import _path, list_workflows
+
+LAN = os.environ.get("EMANUSIA_LAN") == "1"
 
 STATIC = Path(__file__).parent / "static"
 manager: JobManager | None = None
@@ -38,9 +44,14 @@ app = FastAPI(title="EmanusIA", lifespan=lifespan, docs_url=None, redoc_url=None
 
 @app.middleware("http")
 async def host_guard(request: Request, call_next):
-    host = request.headers.get("host", "").split(":")[0]
-    if host not in ("127.0.0.1", "localhost", "testserver"):
-        return JSONResponse({"detail": "host inválido"}, status_code=400)
+    if LAN:
+        if not auth.auth_enabled():  # rede sem login = qualquer um vira admin: proibido
+            return JSONResponse({"detail": "Modo LAN exige usuários: rode `emanusia user add admin "
+                                 "--role admin`"}, status_code=503)
+    else:
+        host = request.headers.get("host", "").split(":")[0]
+        if host not in ("127.0.0.1", "localhost", "testserver"):
+            return JSONResponse({"detail": "host inválido"}, status_code=400)
     return await call_next(request)
 
 
@@ -103,17 +114,33 @@ def get_config(u: auth.User = Depends(current_user)):
 class Settings(BaseModel):
     model: str | None = None
     vision_model: str | None = None
+    email_provider: str | None = None
+    smtp_host: str | None = None
+    smtp_port: int | None = None
+    smtp_user: str | None = None
+    smtp_from: str | None = None
+    imap_host: str | None = None
+    imap_user: str | None = None
+    auto_create_bots: bool | None = None
+    suggest_min_repeats: int | None = None
+    company_name: str | None = None
 
 
 @app.post("/api/settings")
 def set_settings(b: Settings, u: auth.User = Depends(admin)):
-    auth.audit(u.name, "settings", **b.model_dump(exclude_none=True))
-    return config.save_settings(**b.model_dump(exclude_none=True))
+    d = b.model_dump(exclude_none=True)
+    if d.get("email_provider", "outlook") not in ("outlook", "smtp"):
+        raise HTTPException(422, "email_provider deve ser outlook ou smtp")
+    if d.get("suggest_min_repeats", 3) < 2:
+        raise HTTPException(422, "suggest_min_repeats mínimo é 2")
+    auth.audit(u.name, "settings", **d)
+    return config.save_settings(**d)
 
 
 @app.get("/api/tools")
 def tools(u: auth.User = Depends(current_user)):
     return [{"name": t.name, "description": t.description, "risky": bool(t.risky),
+             "group": t.group, "args": list(t.parameters), "required": list(t.required),
              "allowed": u.may_use_tool(t.name)} for t in registry.all_tools()]
 
 
@@ -222,15 +249,14 @@ class WfSave(BaseModel):
 @app.put("/api/workflows/{name}")
 def workflow_put(name: str, b: WfSave, u: auth.User = Depends(runner)):
     try:
-        wf = yaml.safe_load(b.yaml)
-        assert isinstance(wf, dict) and isinstance(wf.get("steps"), list), "precisa de 'steps:' (lista)"
-        for i, s in enumerate(wf["steps"], 1):
-            registry.get(s["tool"])
-            if not u.may_use_tool(s["tool"]):
-                raise PermissionError(f"passo {i}: sem permissão para {s['tool']}")
-    except (yaml.YAMLError, AssertionError, KeyError, TypeError, PermissionError) as e:
-        raise HTTPException(422, f"Workflow inválido: {e}")
-    _path(name).write_text(b.yaml, encoding="utf-8")
+        path = _path(name)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    wf = _parse(b.yaml)
+    rep = validate(wf, u)
+    if not rep["ok"]:
+        raise HTTPException(422, "Workflow inválido: " + "; ".join(rep["errors"][:8]))
+    path.write_text(b.yaml, encoding="utf-8")
     auth.audit(u.name, "workflow_save", workflow=name)
     return {"ok": True}
 
@@ -244,7 +270,8 @@ def workflow_del(name: str, u: auth.User = Depends(runner)):
 
 # ---------------- agendamentos ----------------
 class Sched(BaseModel):
-    workflow: str
+    workflow: str | None = None
+    bot: str | None = None
     when: dict
     params: dict = {}
     unattended: bool = False
@@ -257,12 +284,20 @@ def schedules(u: auth.User = Depends(current_user)):
 
 @app.post("/api/schedules")
 def schedule_add(b: Sched, u: auth.User = Depends(runner)):
-    if not u.may_run_workflow(b.workflow):
+    if bool(b.workflow) == bool(b.bot):
+        raise HTTPException(422, "informe workflow OU bot")
+    if b.workflow and not u.may_run_workflow(b.workflow):
         raise HTTPException(403, "sem permissão neste workflow")
+    if b.bot:
+        bt = bots.get_bot(b.bot)
+        if bt is None or not bots.can_edit(bt, u):
+            raise HTTPException(404, "bot não encontrado")
+        if bt.status != "active":
+            raise HTTPException(422, "ative o bot (validado) antes de agendar")
     if b.unattended and not u.is_admin:
         raise HTTPException(403, "apenas admin pode liberar execução sem supervisão (ações de risco)")
     try:
-        item = scheduler.add_schedule(b.workflow, b.when, b.params, u.name, b.unattended)
+        item = scheduler.add_schedule(b.workflow, b.when, b.params, u.name, b.unattended, bot=b.bot)
     except (ValueError, KeyError) as e:
         raise HTTPException(422, str(e))
     auth.audit(u.name, "schedule_add", **item)
@@ -349,6 +384,266 @@ def user_del(name: str, u: auth.User = Depends(admin)):
 @app.get("/api/audit")
 def audit_log(u: auth.User = Depends(admin)):
     return auth.read_audit()
+
+
+# ---------------- validação ----------------
+def _parse(text: str) -> dict:
+    try:
+        wf = yaml.safe_load(text)
+    except yaml.YAMLError as e:
+        raise HTTPException(422, f"YAML inválido: {e}")
+    if not isinstance(wf, dict):
+        raise HTTPException(422, "o código deve ser um objeto YAML com 'steps:'")
+    return wf
+
+
+class Code(BaseModel):
+    yaml: str
+
+
+@app.post("/api/validate")
+def validate_code(b: Code, u: auth.User = Depends(current_user)):
+    try:
+        wf = yaml.safe_load(b.yaml)
+    except yaml.YAMLError as e:
+        return {"ok": False, "errors": [f"YAML inválido: {e}"], "warnings": [], "risky_tools": []}
+    return validate(wf, u)
+
+
+# ---------------- bots ----------------
+class BotIn(BaseModel):
+    name: str | None = None
+    team: str | None = None
+    role: str | None = None
+    description: str | None = None
+    color: str | None = None
+    yaml: str | None = None
+    origin: str = "manual"
+
+
+def _bot(bot_id: str, u: auth.User, edit: bool = False) -> bots.Bot:
+    b = bots.get_bot(bot_id)
+    if b is None or (edit and not bots.can_edit(b, u)) or \
+            (not edit and not (u.is_admin or b.owner == u.name or b.status == "active")):
+        raise HTTPException(404, "bot não encontrado")
+    return b
+
+
+def _bot_out(b: bots.Bot, u: auth.User) -> dict:
+    d = b.public()
+    d["yaml"] = yaml.safe_dump(b.code, allow_unicode=True, sort_keys=False) \
+        if bots.can_edit(b, u) else None
+    d["can_edit"] = bots.can_edit(b, u)
+    if not d["can_edit"]:
+        d["code"] = None
+    return d
+
+
+@app.get("/api/bots")
+def bots_list(u: auth.User = Depends(current_user)):
+    """Meus bots (admin: todos) + bots ativos de outras pessoas, que qualquer operador pode rodar."""
+    return [_bot_out(b, u) for b in bots.list_bots()
+            if u.is_admin or b.owner == u.name or b.status == "active"]
+
+
+@app.post("/api/bots")
+def bot_create(b: BotIn, u: auth.User = Depends(runner)):
+    code = _parse(b.yaml) if b.yaml else None
+    try:
+        bt = bots.create_bot(b.name or "", u, code, b.team or "Geral", b.role or "worker",
+                             b.description or "", origin=b.origin if b.origin in
+                             ("manual", "ia", "gravacao") else "manual")
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    if code:
+        bots.validate_bot(bt.id, u)
+    return _bot_out(bots.get_bot(bt.id), u)
+
+
+@app.get("/api/bots/{bot_id}")
+def bot_get(bot_id: str, u: auth.User = Depends(current_user)):
+    return _bot_out(_bot(bot_id, u), u)
+
+
+@app.put("/api/bots/{bot_id}")
+def bot_update(bot_id: str, b: BotIn, u: auth.User = Depends(runner)):
+    _bot(bot_id, u, edit=True)
+    try:
+        bt = bots.update_bot(bot_id, u, team=b.team, role=b.role, description=b.description,
+                             color=b.color, name=b.name, code=_parse(b.yaml) if b.yaml else None)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    return _bot_out(bt, u)
+
+
+@app.delete("/api/bots/{bot_id}")
+def bot_delete(bot_id: str, u: auth.User = Depends(runner)):
+    _bot(bot_id, u, edit=True)
+    bots.delete_bot(bot_id, u)
+    return {"ok": True}
+
+
+@app.post("/api/bots/{bot_id}/validate")
+def bot_validate(bot_id: str, u: auth.User = Depends(runner)):
+    _bot(bot_id, u, edit=True)
+    return bots.validate_bot(bot_id, u)
+
+
+class Active(BaseModel):
+    active: bool
+
+
+@app.post("/api/bots/{bot_id}/active")
+def bot_active(bot_id: str, b: Active, u: auth.User = Depends(runner)):
+    _bot(bot_id, u, edit=True)
+    try:
+        return _bot_out(bots.set_active(bot_id, u, b.active), u)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+
+
+class BotRun(BaseModel):
+    params: dict = {}
+    approve_risky: bool | None = None
+
+
+@app.post("/api/bots/{bot_id}/run")
+def bot_run(bot_id: str, b: BotRun, u: auth.User = Depends(runner)):
+    _bot(bot_id, u)
+    try:
+        return manager.submit_bot(bot_id, b.params, u, b.approve_risky).public()
+    except PermissionError as e:
+        raise HTTPException(403, str(e))
+
+
+class Gen(BaseModel):
+    description: str
+
+
+@app.post("/api/bots/generate")
+def bot_generate(b: Gen, u: auth.User = Depends(runner)):
+    if len(b.description.strip()) < 10:
+        raise HTTPException(422, "descreva melhor o que o bot deve fazer")
+    return manager.submit_generate(b.description, u).public()
+
+
+# ---------------- aprendizado ----------------
+@app.get("/api/suggestions")
+def suggestions(u: auth.User = Depends(current_user)):
+    out = []
+    for s in learning.suggestions():
+        if u.is_admin or u.name in s["users"]:
+            out.append({**s, "yaml": yaml.safe_dump(s["code"], allow_unicode=True, sort_keys=False)})
+    return out
+
+
+class Accept(BaseModel):
+    name: str | None = None
+    team: str = "Geral"
+
+
+@app.post("/api/suggestions/{sid}/accept")
+def suggestion_accept(sid: str, b: Accept, u: auth.User = Depends(runner)):
+    if not any(s["id"] == sid and (u.is_admin or u.name in s["users"]) for s in learning.suggestions()):
+        raise HTTPException(404)
+    try:
+        return _bot_out(learning.accept(sid, u, b.name, b.team), u)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+
+
+@app.post("/api/suggestions/{sid}/dismiss")
+def suggestion_dismiss(sid: str, u: auth.User = Depends(runner)):
+    if not any(s["id"] == sid and (u.is_admin or u.name in s["users"]) for s in learning.suggestions()):
+        raise HTTPException(404)
+    learning.dismiss(sid)
+    return {"ok": True}
+
+
+@app.get("/api/learning")
+def learning_stats(u: auth.User = Depends(current_user)):
+    tasks = [t for t in learning.load_tasks() if u.is_admin or t["user"] == u.name]
+    return {"tasks": len(tasks), "success": sum(t["success"] for t in tasks),
+            "recent": [{"ts": t["ts"], "task": t["task"], "success": t["success"],
+                        "tools": [s["tool"] for s in t["steps"]]} for t in tasks[-20:]][::-1]}
+
+
+# ---------------- cofre de acessos ----------------
+class Cred(BaseModel):
+    username: str = ""
+    password: str | None = None  # None = manter a atual
+    label: str = ""
+    kind: str = "web"
+    url: str = ""
+    extra: dict = {}
+    shared: bool = False
+
+
+@app.get("/api/credentials")
+def credentials(u: auth.User = Depends(current_user)):
+    return vault.list_credentials(u.name)
+
+
+@app.put("/api/credentials/{name}")
+def credential_put(name: str, b: Cred, u: auth.User = Depends(runner)):
+    if b.shared and not u.is_admin:
+        raise HTTPException(403, "apenas admin cria acessos compartilhados")
+    try:
+        c = vault.set_credential(vault.SHARED if b.shared else u.name, name, b.username, b.password or None,
+                                 b.label, b.kind, b.url, b.extra)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    auth.audit(u.name, "credential_set", name=name, shared=b.shared, password_changed=b.password is not None)
+    return c
+
+
+@app.delete("/api/credentials/{name}")
+def credential_del(name: str, shared: bool = False, u: auth.User = Depends(runner)):
+    if shared and not u.is_admin:
+        raise HTTPException(403, "apenas admin")
+    try:
+        vault.delete_credential(vault.SHARED if shared else u.name, name)
+    except KeyError:
+        raise HTTPException(404)
+    auth.audit(u.name, "credential_delete", name=name, shared=shared)
+    return {"ok": True}
+
+
+# ---------------- escritório ----------------
+GENERIC = {"step": "trabalhando", "log": "trabalhando", "job_done": "", "waiting": "aguardando aprovação"}
+
+
+@app.get("/api/office")
+def office(since: int = 0, u: auth.User = Depends(current_user)):
+    active = manager.active_bots()
+    visible = {}
+    out = []
+    for b in bots.list_bots():
+        mine = u.is_admin or b.owner == u.name
+        visible[b.id] = mine
+        out.append({"id": b.id, "name": b.name, "team": b.team, "role": b.role, "color": b.color,
+                    "status": b.status, "activity": active.get(b.id, "idle"), "stats": b.stats,
+                    "description": b.description if mine or b.status == "active" else "",
+                    "can_run": b.status == "active" or (mine and b.status == "validated"),
+                    "mine": mine})
+    evs = []
+    for e in events.since(since):
+        if e.get("bot") not in visible and e.get("bot") != "assistente":
+            continue
+        if not visible.get(e.get("bot"), u.is_admin) and e["kind"] in GENERIC:
+            e = {**e, "text": GENERIC[e["kind"]]}  # não vaza dados de bots de outras pessoas
+        evs.append(e)
+    today = time.strftime("%Y-%m-%d")
+    return {"company": config.settings().get("company_name"), "bots": out,
+            "assistant": active.get("assistente", "idle"), "events": evs, "cursor": events.last_id(),
+            "runs_today": sum(1 for j in manager.jobs.values()
+                              if j.kind in ("bot", "workflow")
+                              and time.strftime("%Y-%m-%d", time.localtime(j.created)) == today)}
+
+
+@app.get("/office", response_class=HTMLResponse)
+def office_page():
+    return (STATIC / "office.html").read_text(encoding="utf-8")
 
 
 @app.get("/", response_class=HTMLResponse)

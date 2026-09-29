@@ -43,15 +43,22 @@ def data_dir() -> Path:
 def settings() -> dict:
     """Ajustes editáveis pela GUI (sobrepõem as variáveis de ambiente)."""
     import json
-    base = {"model": MODEL, "vision_model": VISION_MODEL}
+    base = dict(DEFAULTS)
     f = data_dir() / "settings.json"
     if f.exists():
         base.update(json.loads(f.read_text(encoding="utf-8")))
     return base
 
 
+DEFAULTS = {"model": MODEL, "vision_model": VISION_MODEL, "email_provider": "outlook",
+            "smtp_host": "", "smtp_port": 587, "smtp_user": "", "smtp_from": "",
+            "imap_host": "", "imap_user": "", "auto_create_bots": False,
+            "suggest_min_repeats": 3, "company_name": "EmanusIA S.A."}
+
+
 def save_settings(**kw) -> dict:
     import json
-    s = {**settings(), **{k: v for k, v in kw.items() if k in ("model", "vision_model")}}
+    # só chaves conhecidas; senhas nunca são salvas aqui (ficam em variáveis de ambiente)
+    s = {**settings(), **{k: v for k, v in kw.items() if k in DEFAULTS and v is not None}}
     (data_dir() / "settings.json").write_text(json.dumps(s, indent=2), encoding="utf-8")
     return s
