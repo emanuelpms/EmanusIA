@@ -53,6 +53,68 @@ class WorkflowError(Exception):
     pass
 
 
+class StopBefore(Exception):
+    """Execução interrompida de propósito logo antes de um passo (consertar/inserir mostrando)."""
+
+
+# ------------------------------------------------------------------ caminhos de passos
+# "3" = 3º passo; "3.2" = 2º passo dentro do 3º (então/repetir/tentar); "3.else.1", "3.catch.1".
+def _children_key(step: dict, seg: str | None) -> str | None:
+    if seg in ("else", "catch"):
+        return seg
+    for k in ("then", "steps", "try"):
+        if k in step:
+            return k
+    return None
+
+
+def _locate(code: dict, path: str):
+    """Devolve (lista_que_contém_o_passo, índice)."""
+    parts = str(path).split(".")
+    lst, i, seg = code.get("steps") or [], None, None
+    for n, part in enumerate(parts):
+        if part in ("else", "catch"):
+            seg = part
+            continue
+        if i is not None:
+            key = _children_key(lst[i], seg)
+            if key is None:
+                raise KeyError(path)
+            lst = lst[i].setdefault(key, [])
+            seg = None
+        i = int(part) - 1
+        if not (0 <= i < len(lst)) and not (n == len(parts) - 1):
+            raise KeyError(path)
+    return lst, i
+
+
+def get_step(code: dict, path: str) -> dict:
+    lst, i = _locate(code, path)
+    if not (0 <= i < len(lst)):
+        raise KeyError(path)
+    return lst[i]
+
+
+def replace_step(code: dict, path: str, new: dict) -> dict:
+    import copy
+    code = copy.deepcopy(code)
+    lst, i = _locate(code, path)
+    if not (0 <= i < len(lst)):
+        raise KeyError(path)
+    lst[i] = new
+    return code
+
+
+def insert_steps(code: dict, after: int, new: list) -> dict:
+    """Insere passos no nível principal depois do passo `after` (0 = no começo)."""
+    import copy
+    code = copy.deepcopy(code)
+    steps = code.setdefault("steps", [])
+    after = max(0, min(int(after), len(steps)))
+    steps[after:after] = copy.deepcopy(new)
+    return code
+
+
 # ------------------------------------------------------------------ expressões seguras
 def _rng(*a):
     r = range(*a)
@@ -317,7 +379,7 @@ def _check_tool(s, where, user, rep):
 # ------------------------------------------------------------------ execução
 class Runner:
     def __init__(self, user: auth.User, confirm=None, bot: str | None = None, emit=None, depth=0,
-                 on_step=None):
+                 on_step=None, stop_before: str | None = None):
         self.user, self.confirm, self.bot, self.depth = user, confirm, bot, depth
         self._emit = emit
         self.log: list[dict] = []
@@ -325,6 +387,7 @@ class Runner:
         self.on_step = on_step
         self._path: list[int] = []
         self.failed_at: str | None = None  # caminho do passo que interrompeu a execução ("3", "5.2")
+        self.stop_before = stop_before     # para logo antes deste passo (o navegador fica onde está)
 
     @property
     def path(self) -> str:
@@ -351,26 +414,37 @@ class Runner:
                 "outputs": {k: v for k, v in ctx.items() if k not in base and k not in ("erro", "loop_index")
                             and isinstance(v, str | int | float | bool)}}
 
-    def _steps(self, steps: list, ctx: dict, wf_name: str):
-        for i, s in enumerate(steps, 1):
-            self._path.append(i)
-            try:
-                if "tool" in s and "if" in s and not safe_eval(s["if"], ctx):
-                    continue
-                self._step(s, ctx, wf_name)
-            except Exception:
-                if self.failed_at is None:
-                    self.failed_at = self.path
-                raise
-            finally:
+    def _steps(self, steps: list, ctx: dict, wf_name: str, seg: str | None = None):
+        if seg:
+            self._path.append(seg)
+        try:
+            for i, s in enumerate(steps, 1):
+                self._path.append(i)
+                try:
+                    if self.stop_before and self.path == self.stop_before:
+                        raise StopBefore(self.path)
+                    if "tool" in s and "if" in s and not safe_eval(s["if"], ctx):
+                        continue
+                    self._step(s, ctx, wf_name)
+                except StopBefore:
+                    raise
+                except Exception:
+                    if self.failed_at is None:
+                        self.failed_at = self.path
+                    raise
+                finally:
+                    self._path.pop()
+        finally:
+            if seg:
                 self._path.pop()
 
     def _step(self, s: dict, ctx: dict, wf_name: str):
         if "tool" in s:
             return self._tool(s, ctx, wf_name)
         if "if" in s:
-            branch = s.get("then", []) if safe_eval(s["if"], ctx) else s.get("else", [])
-            return self._steps(branch or [], ctx, wf_name)
+            if safe_eval(s["if"], ctx):
+                return self._steps(s.get("then") or [], ctx, wf_name)
+            return self._steps(s.get("else") or [], ctx, wf_name, seg="else")
         if "for_each" in s:
             items = safe_eval(s["for_each"], ctx) if isinstance(s["for_each"], str) else s["for_each"]
             for i, item in enumerate(list(items)[:MAX_LOOP]):
@@ -390,11 +464,13 @@ class Runner:
         if "try" in s:
             try:
                 self._steps(s["try"], ctx, wf_name)
+            except StopBefore:
+                raise
             except Exception as e:
                 self.failed_at = None  # erro tratado pelo catch: não interrompe
                 ctx["erro"] = f"{type(e).__name__}: {e}"
                 self.emit("log", text=f"erro tratado: {e}"[:120])
-                self._steps(s.get("catch") or [], ctx, wf_name)
+                self._steps(s.get("catch") or [], ctx, wf_name, seg="catch")
             return
         if "set" in s:
             for k, v in s["set"].items():

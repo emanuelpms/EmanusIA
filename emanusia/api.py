@@ -583,6 +583,66 @@ def bot_fix(bot_id: str, b: Fix, u: auth.User = Depends(runner)):
     return manager.submit_fix(bot_id, b.path, u).public()
 
 
+class Insert(BaseModel):
+    after: int
+    url: str = ""
+
+
+@app.post("/api/bots/{bot_id}/record")
+def bot_record_more(bot_id: str, b: Insert, u: auth.User = Depends(runner)):
+    """Adicionar passos mostrando (grava a partir do passo `after`)."""
+    _bot(bot_id, u, edit=True)
+    url = b.url.strip()
+    if url and "://" not in url:
+        url = "https://" + url
+    return manager.submit_insert(bot_id, b.after, url, u).public()
+
+
+class SimpleStep(BaseModel):
+    kind: str
+    after: int
+    fields: dict = {}
+
+
+@app.get("/api/simple-steps")
+def simple_steps(u: auth.User = Depends(current_user)):
+    from .rehearsal import SIMPLE_STEPS
+    return SIMPLE_STEPS
+
+
+@app.post("/api/bots/{bot_id}/steps")
+def bot_add_step(bot_id: str, b: SimpleStep, u: auth.User = Depends(runner)):
+    from .rehearsal import add_simple_step
+    _bot(bot_id, u, edit=True)
+    try:
+        return add_simple_step(bot_id, u, b.kind, b.after, b.fields)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+
+
+class SapTeach(BaseModel):
+    name: str
+    script: str
+    team: str = "Geral"
+    credential: str = ""
+
+
+@app.post("/api/teach/sap")
+def teach_sap(b: SapTeach, u: auth.User = Depends(runner)):
+    """Ensinar no SAP: importa a gravação do gravador de scripts do SAP (.vbs)."""
+    from . import sapimport
+    if b.credential and not vault.exists(u.name, b.credential):
+        raise HTTPException(422, "cadastre esse acesso em 🔑 Acessos primeiro")
+    try:
+        res = sapimport.parse(b.script, b.credential)
+        bt = bots.create_bot(b.name, u, res["code"], b.team, description="Aprendido de uma gravação do SAP",
+                             origin="gravacao")
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    bots.validate_bot(bt.id, u)
+    return {"bot": _bot_out(bots.get_bot(bt.id), u), "warnings": res["warnings"]}
+
+
 @app.get("/api/bots/{bot_id}/shots/{name}")
 def bot_shot(bot_id: str, name: str, u: auth.User = Depends(current_user)):
     from .rehearsal import shots_dir

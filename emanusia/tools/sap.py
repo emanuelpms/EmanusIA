@@ -60,6 +60,41 @@ def sap_press(vkey: int | None = None, button_id: str | None = None):
     return {"status": s.findById("wnd[0]/sbar").text}
 
 
+@tool("sap_select", "Marca/desmarca caixa (value true/false), escolhe opção de lista (value = chave) "
+      "ou abre uma aba/menu (sem value).",
+      {"field_id": {"type": "string"}, "value": {}}, ("field_id",))
+def sap_select(field_id: str, value=None):
+    obj = _get_session().findById(field_id)
+    if value is None or value == "":
+        obj.select()
+    elif isinstance(value, bool):
+        obj.selected = value
+    else:
+        obj.key = str(value)
+    return "ok"
+
+
+_SAFE_CALLS = {"setCurrentCell", "selectedRows", "selectColumn", "firstVisibleColumn", "currentCellRow",
+               "clickCurrentCell", "doubleClickCurrentCell", "doubleClick", "click", "selectNode",
+               "expandNode", "pressToolbarButton", "pressToolbarContextButton", "contextMenu",
+               "selectContextMenuItem", "selectContextMenuItemByText", "pressButton", "nodeContextMenu"}
+
+
+@tool("sap_call", "Executa uma ação de grade/árvore do SAP gravada (pressToolbarButton, setCurrentCell, "
+      "doubleClickCurrentCell, selectContextMenuItem...).",
+      {"field_id": {"type": "string"}, "method": {"type": "string"}, "args": {"type": "array"}},
+      ("field_id", "method"), risky=True)
+def sap_call(field_id: str, method: str, args: list | None = None):
+    if method not in _SAFE_CALLS:
+        raise ValueError(f"ação do SAP '{method}' não permitida")
+    obj = _get_session().findById(field_id)
+    if method in ("selectedRows", "currentCellRow", "firstVisibleColumn"):  # propriedades
+        setattr(obj, method, (args or [""])[0])
+    else:
+        getattr(obj, method)(*(args or []))
+    return "ok"
+
+
 @tool("sap_read_grid", "Lê um ALV Grid (ex.: resultado de relatório) como linhas com cabeçalho.",
       {"grid_id": {"type": "string"}, "max_rows": {"type": "integer"}}, ("grid_id",))
 def sap_read_grid(grid_id: str, max_rows: int = 1000):

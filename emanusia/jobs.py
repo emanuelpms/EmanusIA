@@ -184,6 +184,15 @@ class JobManager:
         job = Job("fix", f"Mostrando onde fica: {b.name}", user.name)
         return self._start(job, lambda j: fix_step(bot_id, path, user, j._stop, self._confirm_for(j, None)))
 
+    def submit_insert(self, bot_id: str, after: int, url: str, user: auth.User) -> Job:
+        """Adicionar passos mostrando: roda no worker (usa o navegador dos bots) até a pessoa clicar em Terminei."""
+        from .rehearsal import record_insert
+        b = bots.get_bot(bot_id)
+        if b is None:
+            raise KeyError(bot_id)
+        job = Job("teach", f"Ensinando mais passos: {b.name}", user.name)
+        return self._start(job, lambda j: record_insert(bot_id, after, user, j._stop, url, self._confirm_for(j, None)))
+
     def submit_generate(self, description: str, user: auth.User) -> Job:
         from .botgen import generate
         job = Job("generate", f"Gerar bot: {description[:60]}", user.name)

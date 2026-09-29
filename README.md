@@ -28,6 +28,8 @@ Manual: `pip install -e ".[all,dev]"`, `playwright install chromium`, `ollama pu
 | **💡 Aprendizado** | Toda tarefa do chat que dá certo vira experiência: tarefas parecidas ganham dicas e, quando a mesma rotina se repete 3×, o sistema sugere um bot pronto (valores que mudam viram parâmetros). Opcional: criar esses bots automaticamente como rascunho (nunca ativa sozinho). |
 | **Outros** | SAP GUI Scripting, RPA de desktop (pywinauto), visão por screenshot, APIs REST, SQL, Power BI, agendador, multiusuário com papéis e auditoria. |
 
+> 📐 Arquitetura completa, tecnologias, o que foi testado e o passo a passo de instalação: **[docs/ARQUITETURA.md](docs/ARQUITETURA.md)**
+
 ## Modo simples: qualquer pessoa ensina um robô
 1. **Ensinar mostrando** (aba Bots): dá um nome, diz o site e clica em *Começar a ensinar*. Uma janela
    abre, a pessoa faz a tarefa normalmente e clica em *Terminei*. Cada clique vira um passo com o nome
@@ -42,7 +44,12 @@ Manual: `pip install -e ".[all,dev]"`, `playwright install chromium`, `ollama pu
 4. **Revisão do padrinho**: robô criado por quem não é padrinho/admin só começa a trabalhar depois que
    um padrinho aprova (ou pede ajustes com um recado). Qualquer mudança depois exige nova revisão.
    Marque o usuário como padrinho em Admin (ou `emanusia user add maria --reviewer`).
-5. **Linguagem comum** em tudo: erros (“Você ainda não cadastrou o seu acesso *erp*”), pedidos de
+6. **Adicionar passos** a um robô pronto: *mostrando* (o robô refaz até o ponto escolhido e grava o que
+   a pessoa fizer dali em diante) ou por **ações prontas** (enviar e-mail, esperar, abrir site, salvar
+   tabela da página em planilha, montar painel). Funciona também dentro de quadros internos (iframes).
+7. **Ensinar no SAP**: grave a tarefa com o gravador do próprio SAP (Alt+F12) e envie o `.vbs`; o
+   sistema converte em passos em português (senhas nunca são importadas).
+8. **Linguagem comum** em tudo: erros (“Você ainda não cadastrou o seu acesso *erp*”), pedidos de
    autorização (“O robô vai ENVIAR um e-mail para gerente@… com 1 anexo. Pode enviar?”) e
    formulário com as informações que mudam a cada execução.
 

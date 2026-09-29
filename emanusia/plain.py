@@ -92,8 +92,19 @@ TOOL_TEXT = {
     "email_read": lambda a, s: "Ler os e-mails da caixa de entrada",
     "sap_login": lambda a, s: f"Entrar no SAP com o acesso “{a.get('credential')}”",
     "sap_run_transaction": lambda a, s: f"Abrir a transação {a.get('tcode')} no SAP",
-    "sap_set_field": lambda a, s: f"Preencher um campo do SAP com “{_short(a.get('value', ''), 30)}”",
-    "sap_press": lambda a, s: "Confirmar no SAP" if a.get("vkey") in (None, 0) else "Apertar um botão no SAP",
+    "sap_set_field": lambda a, s: (f"Preencher “{s['label']}” no SAP com “{_short(a.get('value', ''), 30)}”"
+                                   if s and s.get("label") else f"Preencher um campo do SAP com “{_short(a.get('value', ''), 30)}”"),
+    "sap_press": lambda a, s: (f"Clicar em “{s['label']}” no SAP" if a.get("button_id") and s and s.get("label")
+                               else "Confirmar (Enter) no SAP" if a.get("vkey") in (None, 0)
+                               else {8: "Executar (F8) no SAP", 11: "Gravar (Ctrl+S) no SAP", 3: "Voltar (F3) no SAP"}.get(a.get("vkey"), f"Apertar a tecla {a.get('vkey')} no SAP")),
+    "sap_select": lambda a, s: (f"{'Marcar' if a.get('value') else 'Desmarcar'} “{(s or {}).get('label', 'opção')}” no SAP" if isinstance(a.get("value"), bool)
+                                else f"Escolher “{a.get('value')}” em “{(s or {}).get('label', 'lista')}” no SAP" if a.get("value") not in (None, "")
+                                else f"Abrir “{(s or {}).get('label', 'aba')}” no SAP"),
+    "sap_call": lambda a, s: {"pressToolbarButton": f"Clicar no botão “{(a.get('args') or [''])[0]}” do relatório SAP",
+                              "setCurrentCell": "Selecionar uma célula do relatório SAP",
+                              "doubleClickCurrentCell": "Abrir (duplo clique) a linha do relatório SAP",
+                              "selectContextMenuItem": f"Escolher “{(a.get('args') or [''])[0]}” no menu do SAP",
+                              "contextMenu": "Abrir o menu do relatório SAP"}.get(a.get("method"), f"Ação “{a.get('method')}” no SAP"),
     "sap_read_grid": lambda a, s: "Copiar o relatório do SAP",
     "desktop_start_app": lambda a, s: f"Abrir o programa {_file(a.get('command', ''))}",
     "desktop_click": lambda a, s: f"Clicar em “{a.get('control')}” no programa",
@@ -208,6 +219,8 @@ def describe_action(tool: str, args: dict) -> str:
         return f"O robô vai alterar um campo no SAP para “{_short(a.get('value', ''), 40)}”. Pode alterar?"
     if tool == "sap_press":
         return "O robô vai confirmar/gravar uma tela no SAP. Pode continuar?"
+    if tool == "sap_call":
+        return f"O robô vai fazer uma ação no relatório do SAP ({describe_step({'tool': tool, 'args': a}).lower()}). Pode continuar?"
     if tool == "sql_execute":
         return "O robô vai ALTERAR dados no banco de dados. Pode continuar?"
     if tool == "http_send":
@@ -227,17 +240,11 @@ def describe_action(tool: str, args: dict) -> str:
 def _step_at(code: dict | None, path: str | None) -> dict | None:
     if not code or not path:
         return None
-    cur, steps = None, code.get("steps") or []
-    for part in path.split("."):
-        if part.isdigit():
-            i = int(part) - 1
-            if not (0 <= i < len(steps)):
-                return None
-            cur = steps[i]
-            steps = cur.get("then") or cur.get("steps") or cur.get("try") or []
-        elif cur is not None:
-            steps = cur.get(part) or []
-    return cur
+    from .engine import get_step
+    try:
+        return get_step(code, path)
+    except (KeyError, ValueError, IndexError, TypeError):
+        return None
 
 
 def explain_error(err: str, step: dict | None = None) -> str:

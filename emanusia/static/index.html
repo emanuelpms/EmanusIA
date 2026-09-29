@@ -294,7 +294,8 @@ async function viewBots() {
    <input id="tt" placeholder="Time" list="teams" style="flex:1"><datalist id="teams">${teams.map(t => `<option>${esc(t)}`).join('')}</datalist></div>
    <div class="row" style="margin-top:8px"><select id="tc" style="flex:0 1 330px"><option value="">O site pede login? Escolha seu acesso (opcional)</option>
    ${creds.map(c => `<option value="${esc(c.name)}">🔑 ${esc(c.label || c.name)}</option>`).join('')}</select>
-   <button class="b big" onclick="teach()">🎬 Começar a ensinar</button></div>
+   <button class="b big" onclick="teach()">🎬 Começar a ensinar</button>
+   <button class="b sec" onclick="teachSap()">🟦 Ensinar no SAP</button></div>
    <details style="margin-top:12px"><summary class="mut small">Outras formas de criar (para quem já tem prática)</summary>
    <div class="row" style="margin-top:8px"><input id="bn" placeholder="Nome" style="flex:1"><input id="bt" placeholder="Time" list="teams" style="flex:1">
    <select id="br" style="flex:0 0 130px"><option value="worker">Funcionário</option><option value="boss">Chefe</option></select></div>
@@ -356,7 +357,7 @@ async function openBot(id) {
   ${rv.status === 'pending' && reviewing ? `<div class="note warn">🎓 <b>${esc(b.owner)}</b> pediu sua revisão${rv.note ? ': “' + esc(rv.note) + '”' : ''}. Confira os passos e o ensaio abaixo.</div>` : ''}
   ${reh ? `<div class="note ${reh.ok ? 'ok' : 'bad'}">🎭 Ensaio de ${esc(reh.at)}: ${reh.ok ? '<b>deu tudo certo!</b>' : '<b>parou num passo.</b> ' + esc(reh.error || '')}</div>` : ''}
   <b>O que o robô faz</b><ol class="steps">${d.steps.map(s => stepHtml(s, shot[s.path], b.can_edit, reh)).join('')}</ol>
-  ${b.can_edit ? `<button class="b sec" onclick="addStepHint()">+ Adicionar passo</button>` : ''}
+  ${b.can_edit ? `<button class="b sec" onclick="openAddStep()">+ Adicionar passo</button>` : ''}
   ${d.params.length ? `<p><b>Informações que podem mudar a cada vez</b></p>${d.params.map((p, i) => `<label>${esc(p.label)}</label>
     <input data-param="${esc(p.name)}" data-kind="${typeof p.value}" value="${esc(typeof p.value === 'object' ? JSON.stringify(p.value) : p.value)}" ${b.can_edit ? '' : 'disabled'}>`).join('')}
     ${b.can_edit ? '<p><button class="b sec" onclick="saveParams()">Salvar informações</button></p>' : ''}` : ''}
@@ -373,7 +374,7 @@ function stepHtml(s, r, edit, reh) {
   return `<li class="st ${bad ? 'bad' : ''}" style="margin-left:${s.depth * 22}px"><div class="num">${r ? (r.ok ? '✓' : '✖') : esc(s.path.split('.').pop())}</div>
   <div class="tx"><div>${s.icon} ${esc(s.text)}</div>
   ${bad ? `<div class="small" style="color:var(--bad);margin-top:4px">${esc(r.error)}</div>
-    ${s.fixable && top && edit ? `<button class="b" style="margin-top:6px" onclick="fixStep('${s.path}')">👉 Mostrar onde fica</button>` : ''}` : ''}
+    ${s.fixable && edit ? `<button class="b" style="margin-top:6px" onclick="fixStep('${s.path}')">👉 Mostrar onde fica</button>` : ''}` : ''}
   ${r && r.shot ? `<img src="/api/bots/${encodeURIComponent(BOT.b.id)}/shots/${r.shot}?t=${encodeURIComponent(reh.at)}" onclick="window.open(this.src)" alt="print do passo">` : ''}</div>
   ${edit && top ? `<div class="acts"><button title="Editar" onclick="editStep('${s.path}')">✏️</button><button title="Subir" onclick="moveStep('${s.path}',-1)">↑</button>
     <button title="Descer" onclick="moveStep('${s.path}',1)">↓</button><button title="Apagar" onclick="delStep('${s.path}')">🗑</button></div>` : ''}</li>`;
@@ -405,7 +406,68 @@ async function saveStep(p) {
   if ($('#sl')) { if ($('#sl').value.trim()) s.label = $('#sl').value.trim(); else delete s.label; }
   await saveCode({...BOT.b.code, steps: st});
 }
-function addStepHint() { toast('Para adicionar passos mostrando, o jeito mais fácil é ensinar de novo. Para algo específico, use o Modo avançado ou peça ajuda ao padrinho.'); }
+/* --- adicionar passos: mostrando no site ou com ações prontas --- */
+const SIMPLE_FORMS = {
+  email: [['to', 'Para quem (e-mails separados por ;)'], ['subject', 'Assunto'], ['body', 'Mensagem'], ['attachment', 'Anexar arquivo (opcional, ex.: notas.xlsx)']],
+  open: [['url', 'Endereço do site']], wait: [['seconds', 'Quantos segundos']], note: [['text', 'Recado']],
+  table_to_excel: [['path', 'Nome da planilha (ex.: notas.xlsx)']],
+  dashboard: [['source', 'Planilha de origem (ex.: notas.xlsx)'], ['title', 'Título do painel'], ['path', 'Nome do painel (ex.: painel.html)']]};
+async function openAddStep() {
+  const kinds = await api('/api/simple-steps'), n = (BOT.b.code.steps || []).length;
+  const pos = `<option value="${n}">no fim</option>${(BOT.b.code.steps || []).map((s, i) => i < n - 1 ? `<option value="${i + 1}">depois do passo ${i + 1}</option>` : '').join('')}<option value="0">no começo</option>`;
+  modal(`<h2>+ Adicionar passo</h2><label>Onde?</label><select id="ap">${pos}</select>
+  <div class="card" style="margin-top:12px"><b>🎬 Mostrando no site</b><p class="small mut">O robô refaz os passos até esse ponto numa janela do navegador. Continue a tarefa ali e clique em Terminei.</p>
+   <input id="au" placeholder="Site (só se ainda não houver um aberto nesse ponto)"><p><button class="b" onclick="recordMore()">🎬 Mostrar os próximos passos</button></p></div>
+  <div class="card"><b>🧩 Ações prontas</b><div class="row" style="margin-top:8px">${Object.entries(kinds).map(([k, t]) =>
+    `<button class="b sec" onclick="simpleForm('${k}', ${JSON.stringify(t).replace(/"/g, '&quot;')})">${esc(t)}</button>`).join('')}</div><div id="sf"></div></div>`);
+  $('#mbody').style.width = 'min(760px,94vw)';
+}
+function simpleForm(kind, title) {
+  $('#sf').innerHTML = `<p><b>${esc(title)}</b></p>${SIMPLE_FORMS[kind].map(([k, l]) => `<label>${esc(l)}</label><input data-sf="${k}">`).join('')}
+  <p><button class="b" onclick="saveSimple('${kind}')">Adicionar</button></p>`;
+}
+async function saveSimple(kind) {
+  const fields = {}; document.querySelectorAll('[data-sf]').forEach(i => fields[i.dataset.sf] = i.value);
+  try { const r = await api(`/api/bots/${BOT.b.id}/steps`, 'POST', {kind, after: +$('#ap').value, fields});
+    if (!r.ok) toast('Passo adicionado, mas falta ajustar: ' + r.plain_errors.join(' ')); openBot(BOT.b.id); } catch (e) { toast(e.message); }
+}
+async function recordMore() {
+  const after = +$('#ap').value, url = $('#au').value.trim();
+  try {
+    const j = await api(`/api/bots/${BOT.b.id}/record`, 'POST', {after, url});
+    closeModal();
+    const bar = document.createElement('div'); bar.className = 'recbar';
+    bar.innerHTML = `<span style="font-size:22px">🔴</span><div><b>Estou aprendendo os próximos passos</b><div class="small" style="opacity:.8">Espere o robô chegar no ponto e continue a tarefa na janela do navegador.</div></div>
+      <button class="b big" style="background:#22c7a9" id="tdone">✅ Terminei</button>`;
+    document.body.append(bar);
+    $('#tdone').onclick = async () => { $('#tdone').disabled = true; $('#tdone').textContent = 'Salvando...'; await api(`/api/jobs/${j.id}/stop`, 'POST'); };
+    const r = await follow(j.id, () => {}); bar.remove();
+    if (r.status === 'error') toast(r.plain_error || r.result); else toast(`Aprendi ${r.result.added} passo(s) novo(s)!`);
+  } catch (e) { toast(e.message); }
+  openBot(BOT.b.id);
+}
+
+/* --- ensinar no SAP (importa a gravação do próprio SAP) --- */
+async function teachSap() {
+  const creds = (await api('/api/credentials')).filter(c => c.kind === 'sap');
+  modal(`<h2>🟦 Ensinar no SAP</h2>
+  <ol class="small"><li>No SAP, aperte <b>Alt+F12</b> → <b>Gravação e reprodução de script</b>.</li><li>Clique no botão vermelho de <b>gravar</b> e faça a tarefa normalmente.</li>
+  <li>Clique em <b>parar</b>. O SAP salva um arquivo <b>.vbs</b> (ele mostra onde).</li><li>Escolha esse arquivo aqui embaixo.</li></ol>
+  <label>Nome do robô</label><input id="sn">
+  <label>Time</label><input id="st2" value="Geral">
+  <label>Acesso do SAP (para o robô entrar sozinho)</label><select id="sc"><option value="">— sem logon (o SAP já estará aberto)</option>${creds.map(c => `<option value="${esc(c.name)}">🔑 ${esc(c.label || c.name)}</option>`).join('')}</select>
+  <label>Arquivo da gravação (.vbs)</label><input type="file" id="sf2" accept=".vbs,.txt">
+  <p><button class="b big" onclick="doTeachSap()">Criar o robô</button></p>
+  <p class="small mut">A senha digitada durante a gravação nunca é importada.</p>`);
+}
+async function doTeachSap() {
+  const f = $('#sf2').files[0]; if (!f) return toast('Escolha o arquivo .vbs gravado no SAP.');
+  if (!$('#sn').value.trim()) return toast('Dê um nome ao robô.');
+  const script = await f.text();
+  try { const r = await api('/api/teach/sap', 'POST', {name: $('#sn').value, team: $('#st2').value || 'Geral', credential: $('#sc').value, script});
+    if (r.warnings.length) toast('Robô criado. Atenção:\n- ' + r.warnings.join('\n- '));
+    viewBots(); openBot(r.bot.id); } catch (e) { toast(e.message); }
+}
 async function saveParams() {
   const params = {...(BOT.b.code.params || {})};
   document.querySelectorAll('[data-param]').forEach(i => { params[i.dataset.param] = typed(i); });

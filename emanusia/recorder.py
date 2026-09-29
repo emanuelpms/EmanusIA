@@ -40,7 +40,17 @@ JS = r"""
 (() => {
   if (window.__emanusiaRec) return; window.__emanusiaRec = true;
 """ + SELECTOR_JS + r"""
-  const send = e => window.__emanusia_rec(e);
+  function frameChain() {   // em qual quadro interno (iframe) a ação aconteceu
+    const chain = []; let w = window;
+    while (w !== w.top) {
+      let fe = null; try { fe = w.frameElement; } catch (err) {}
+      chain.unshift(!fe ? 'iframe' : fe.id ? '#' + CSS.escape(fe.id)
+        : fe.name ? 'iframe[name="' + q(fe.name) + '"]' : 'iframe');
+      w = w.parent;
+    }
+    return chain.join(' >> ');
+  }
+  const send = e => window.__emanusia_rec({...e, frame: frameChain()});
   document.addEventListener('click', ev => {
     const el = ev.target.closest('a,button,input,select,label,[role=button]') || ev.target;
     if (el.tagName === 'INPUT' && !['checkbox', 'radio', 'submit', 'button'].includes(el.type)) return;
@@ -67,24 +77,35 @@ class Recorder:
         self.events: list[dict] = []
         self._lock = threading.Lock()
 
-    def attach(self, context):
+    def attach(self, context, pages=()):
+        """Grava no contexto (páginas novas) e também nas páginas já abertas (`pages`)."""
         context.expose_binding("__emanusia_rec", lambda src, e: self._on(e))
         context.add_init_script(JS)
+        for pg in pages:
+            for fr in pg.frames:
+                try:
+                    fr.evaluate(JS)
+                except Exception:
+                    pass
 
     def _on(self, e: dict):
         with self._lock:
             last = self.events[-1] if self.events else None
             # digitação vira 1 passo só (mantém o valor final)
             if last and e["kind"] in ("fill", "secret", "select") and last["kind"] == e["kind"] \
-                    and last["selector"] == e["selector"]:
+                    and last["selector"] == e["selector"] and last.get("frame") == e.get("frame"):
                 self.events[-1] = e
             else:
                 self.events.append(e)
 
-    def steps(self) -> list[dict]:
-        steps = [{"tool": "web_open", "args": {"url": self.start_url}}]
+    def steps(self, with_open: bool = True) -> list[dict]:
+        steps = [{"tool": "web_open", "args": {"url": self.start_url}}] if with_open else []
+        frame = ""
         for e in self.events:
             k = e["kind"]
+            if e.get("frame", "") != frame:   # entrou/saiu de um quadro interno
+                frame = e.get("frame", "")
+                steps.append({"tool": "web_frame", "args": {"selector": frame}})
             lab = {"label": e["label"]} if e.get("label") else {}
             if k == "click":
                 steps.append({"tool": "web_click", "args": {"selector": e["selector"]}, **lab})
