@@ -105,6 +105,18 @@ def _parametrize(recs: list[dict]) -> tuple[dict, list]:
     return params, steps
 
 
+def _suggest_name(recs: list[dict]) -> str:
+    """Nome legível: as palavras comuns a todas as tarefas, na ordem em que a pessoa escreveu
+    (ex.: "baixar os pedidos do portal acme do dia 3" -> "Baixar pedidos portal acme")."""
+    common = set.intersection(*(tokens(r["task"]) for r in recs))
+    words = []
+    for w in re.findall(r"\w+", recs[-1]["task"]):
+        n = unicodedata.normalize("NFKD", w.lower()).encode("ascii", "ignore").decode()
+        if n in common and not n.isdigit() and w.lower() not in (x.lower() for x in words):
+            words.append(w.lower())
+    return (" ".join(words[:4]) or "Rotina aprendida").capitalize()
+
+
 def suggestions(min_repeats: int | None = None) -> list[dict]:
     from . import bots
     min_repeats = min_repeats or int(config.settings().get("suggest_min_repeats", 3))
@@ -122,12 +134,7 @@ def suggestions(min_repeats: int | None = None) -> list[dict]:
         if sig in existing or state.get(sid) in ("accepted", "dismissed", "auto"):
             continue
         params, steps = _parametrize(recs)
-        words: dict[str, int] = {}
-        for r in recs:
-            for w in tokens(r["task"]):
-                words[w] = words.get(w, 0) + 1
-        top = [w for w, _ in sorted(words.items(), key=lambda x: (-x[1], x[0]))[:3]]
-        out.append({"id": sid, "title": recs[-1]["task"][:120], "name": "Bot " + " ".join(top).title(),
+        out.append({"id": sid, "title": recs[-1]["task"][:120], "name": _suggest_name(recs),
                     "count": len(recs), "users": sorted({r["user"] for r in recs}),
                     "tools": list(sig), "code": {"params": params, "steps": steps}})
     return sorted(out, key=lambda s: -s["count"])

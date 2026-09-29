@@ -222,6 +222,7 @@ def test_learning_suggests_parametrized_bot_and_accept_creates_it():
     assert len(sg) == 1
     s = sg[0]
     assert s["count"] == 3 and s["tools"] == ["web_open", "web_table", "excel_write"]
+    assert s["name"] == "Baixar tabela pedidos portal"
     assert s["code"]["params"] == {"url": "https://a.com/3"}
     assert s["code"]["steps"][0]["args"]["url"] == "{{url}}"
     assert s["code"]["steps"][2]["args"]["path"] == "r.xlsx"  # igual sempre: fica fixo

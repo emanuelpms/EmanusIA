@@ -123,7 +123,10 @@ ICON = {"web": "🌐", "excel": "📗", "dashboard": "📊", "data": "🧮", "ma
 
 def _friendly(text: str) -> str:
     """{{filial}} -> «Filial» (a informação que muda a cada vez)."""
-    return re.sub(r"\{\{\s*([\w.]+)\s*\}\}", lambda m: "«" + param_label(m.group(1).split(".")[0]) + "»", text)
+    rx = r"\{\{\s*([\w.]+)\s*\}\}"
+    lab = lambda m: "«" + param_label(m.group(1).split(".")[0]) + "»"
+    text = re.sub("“" + rx + "”", lab, text)  # “{{filial}}” -> «Filial» (sem aspas duplicadas)
+    return re.sub(rx, lab, text)
 
 
 def describe_step(s: dict) -> str:

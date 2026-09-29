@@ -711,7 +711,9 @@ def suggestions(u: auth.User = Depends(current_user)):
     out = []
     for s in learning.suggestions():
         if u.is_admin or u.name in s["users"]:
-            out.append({**s, "yaml": yaml.safe_dump(s["code"], allow_unicode=True, sort_keys=False)})
+            out.append({**s, "yaml": yaml.safe_dump(s["code"], allow_unicode=True, sort_keys=False),
+                        "steps": [d["text"] for d in plain.describe_code(s["code"])],
+                        "params": [plain.param_label(k) for k in s["code"].get("params") or {}]})
     return out
 
 

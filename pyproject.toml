@@ -14,7 +14,7 @@ desktop = ["pywinauto; sys_platform == 'win32'", "pyautogui", "pillow", "pywin32
 gui = ["pywebview"]
 sql = ["pyodbc"]
 all = ["emanusia[sap,desktop,gui,sql]"]
-dev = ["pytest", "httpx"]
+dev = ["pytest", "httpx", "pillow"]
 
 [project.scripts]
 emanusia = "emanusia.cli:main"

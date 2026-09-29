@@ -5,7 +5,22 @@ funcionários: navegam em portais, fazem login, analisam planilhas, montam dashb
 pelo Outlook e operam o SAP e outros programas. Tudo aparece num **escritório em pixel art** que
 cresce conforme a empresa contrata mais bots.
 
-![fluxo](https://img.shields.io/badge/LLM-Ollama%20local-blue) ![testes](https://img.shields.io/badge/testes-pytest-green)
+![IA local](https://img.shields.io/badge/IA-Ollama%20local-blue) ![testes](https://img.shields.io/badge/testes-102%20passando-green) ![plataforma](https://img.shields.io/badge/Windows-10%2F11-0078d6)
+
+<p align="center"><img src="docs/images/escritorio.gif" alt="Escritório em pixel art com os robôs trabalhando" width="900"></p>
+<p align="center"><i>O escritório ao vivo: o chefe do Financeiro delega o trabalho, os robôs entregam e voltam às mesas; o painel lateral mostra o status de cada um.</i></p>
+
+## 📸 Telas
+
+| | |
+|---|---|
+| <img src="docs/images/bots.png" alt="Aba Bots com Ensinar um robô novo"><br>**Ensinar um robô novo** — faça a tarefa uma vez, o robô aprende. | <img src="docs/images/robo-passos.png" alt="Passos do robô em português com prints do ensaio"><br>**Passos em português** + ensaio com um print de cada passo. |
+| <img src="docs/images/ensaio-falhou.png" alt="Ensaio que falhou com botão Mostrar onde fica"><br>**O site mudou?** O passo fica vermelho, explicado em português, com **👉 Mostrar onde fica**. | <img src="docs/images/revisao.png" alt="Revisão do padrinho"><br>**Revisão do padrinho** antes do robô começar a trabalhar. |
+| <img src="docs/images/autorizacao.png" alt="Pedido de autorização em linguagem comum"><br>**Ações importantes pedem permissão**, em linguagem comum. | <img src="docs/images/adicionar-passo.png" alt="Adicionar passo mostrando ou com ações prontas"><br>**Adicionar passos** mostrando no site ou com ações prontas. |
+| <img src="docs/images/painel-dados.png" alt="Painel interativo gerado a partir de planilha"><br>**Dashboards interativos** gerados a partir de planilhas (filtros, período, exportação). | <img src="docs/images/acessos.png" alt="Cofre de acessos"><br>**Acessos**: cada pessoa guarda o próprio login; senhas criptografadas. |
+| <img src="docs/images/aprendizado.png" alt="Bots sugeridos pelo aprendizado"><br>**Aprendizado**: rotinas repetidas no chat viram sugestões de robôs. | <img src="docs/images/escritorio.png" alt="Escritório com painel da equipe"><br>**Escritório** com indicadores, equipe e ficha de cada robô. |
+
+> As imagens são geradas pelo próprio sistema rodando (`python scripts/screenshots.py`) com uma empresa de exemplo.
 
 ## Instalação (Windows — Acer Nitro V15, 16 GB, RTX 4050)
 1. Instale **Python 3.10+** e o **[Ollama](https://ollama.com)**.
