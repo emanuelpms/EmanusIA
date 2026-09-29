@@ -47,6 +47,7 @@ def main(argv=None):
     u.add_argument("name", nargs="?")
     u.add_argument("--role", default="operator", choices=["admin", "operator", "viewer"])
     u.add_argument("--tools", help="whitelist de ferramentas, separadas por vírgula")
+    u.add_argument("--reviewer", action="store_true", help="padrinho: revisa e libera bots de outras pessoas")
     sub.add_parser("tools", help="lista as ferramentas disponíveis")
     a = ap.parse_args(argv)
 
@@ -75,7 +76,7 @@ def main(argv=None):
             auth.remove_user(a.name)
         else:
             auth.add_user(a.name, getpass.getpass("Senha: "), a.role,
-                          a.tools.split(",") if a.tools else None)
+                          a.tools.split(",") if a.tools else None, reviewer=a.reviewer)
             print("Usuário criado. A GUI passa a exigir login.")
     elif a.cmd == "serve":
         import os

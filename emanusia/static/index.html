@@ -30,6 +30,18 @@ table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:8px;bord
 .modal>div{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px;width:min(560px,92vw);max-height:90vh;overflow:auto}
 pre{background:var(--bg);border:1px solid var(--line);padding:10px;border-radius:9px;white-space:pre-wrap;font-size:12.5px;max-height:260px;overflow:auto}
 #rec{display:none;background:var(--warn);color:#2b1c00;padding:10px 14px;border-radius:12px;margin-bottom:12px}
+.hero{background:linear-gradient(135deg,#4f8cff22,#22c7a922);border:1px solid var(--line);border-radius:16px;padding:18px;margin-bottom:14px}
+.hero h3{margin:0 0 4px;font-size:19px}.how{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px;margin:10px 0}
+.how div{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px;font-size:13px}.how b{display:block;font-size:22px;color:var(--acc)}
+button.big{font-size:16px;padding:11px 20px;border-radius:12px}
+.track{display:flex;gap:4px;margin:12px 0;flex-wrap:wrap}.track span{flex:1;min-width:88px;text-align:center;font-size:12px;padding:6px 4px;border-radius:8px;background:var(--line);color:var(--mut)}
+.track span.ok{background:var(--ok);color:#00201a}.track span.now{background:var(--acc);color:#fff;font-weight:600}
+.steps{list-style:none;margin:8px 0;padding:0}.st{display:flex;gap:10px;align-items:flex-start;padding:8px;border:1px solid var(--line);border-radius:10px;margin-bottom:6px;background:var(--bg)}
+.st.bad{border-color:var(--bad);background:#ff6b6b14}.st .num{width:24px;height:24px;border-radius:50%;background:var(--line);display:grid;place-items:center;font-size:12px;flex:none}
+.st .tx{flex:1;min-width:0}.st .acts{display:flex;gap:4px;flex:none}.st .acts button{all:unset;cursor:pointer;padding:2px 6px;border-radius:6px;color:var(--mut)}.st .acts button:hover{background:var(--line)}
+.st img{max-width:150px;border-radius:6px;border:1px solid var(--line);cursor:zoom-in;margin-top:6px;display:block}
+.note{border-radius:10px;padding:10px 12px;margin:8px 0;font-size:14px}.note.bad{background:#ff6b6b1f;border:1px solid var(--bad)}.note.warn{background:#ffb0201f;border:1px solid var(--warn)}.note.ok{background:#22c7a91f;border:1px solid var(--ok)}
+.recbar{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#1f3a5f;color:#fff;border-radius:16px;padding:14px 18px;display:flex;gap:14px;align-items:center;box-shadow:0 10px 30px #0008;z-index:20;max-width:92vw}
 @media(max-width:700px){nav{width:64px}nav button{font-size:0}nav button::first-letter{font-size:18px}nav h1,.who{display:none}}
 </style>
 <body>
@@ -53,7 +65,14 @@ let ME = null, TAB = 'office', HISTORY = [], ACTIVE = null;
 const TABS = [['office','🏢 Escritório'],['chat','💬 Chat'],['bots','🤖 Bots'],['learn','💡 Aprendizado'],['creds','🔑 Acessos'],['flows','⚙️ Automações'],['jobs','📋 Tarefas'],['sched','⏰ Agendamentos'],['files','📁 Arquivos'],['admin','👥 Admin'],['cfg','🔧 Ajustes']];
 
 function modal(html) { $('#mbody').innerHTML = html; $('#modal').classList.add('show'); }
-function closeModal() { $('#modal').classList.remove('show'); }
+function closeModal() { $('#modal').classList.remove('show'); $('#mbody').style.width = ''; }
+function typed(el) {   // devolve o valor no mesmo tipo do original (número, sim/não, lista)
+  const v = el.value, k = el.dataset.kind;
+  if (k === 'number' && v.trim() !== '' && !isNaN(+v)) return +v;
+  if (k === 'boolean') return /^(true|sim|s|1)$/i.test(v.trim());
+  if (k === 'object') { try { return JSON.parse(v); } catch { return v; } }
+  return v;
+}
 $('#modal').addEventListener('click', e => { if (e.target.id === 'modal') closeModal(); });
 
 function showLogin() {
@@ -101,9 +120,10 @@ let approvalShown = null;
 function askApproval(j) {
   const key = j.id + JSON.stringify(j.pending);
   if (approvalShown === key) return; approvalShown = key;
-  modal(`<h2>⚠️ Autorizar ação?</h2><p>O robô quer executar:</p><pre>${esc(j.pending.tool)}\n${esc(JSON.stringify(j.pending.args, null, 2))}</pre>
-  <div class="row"><button class="b" onclick="answer('${j.id}',true)">Autorizar</button>
-  <button class="b bad" onclick="answer('${j.id}',false)">Negar</button></div>`);
+  modal(`<h2>🤖 O robô precisa da sua permissão</h2><p style="font-size:17px">${esc(j.pending.text || j.pending.tool)}</p>
+  <details><summary class="mut small">Detalhes técnicos</summary><pre>${esc(j.pending.tool)}\n${esc(JSON.stringify(j.pending.args, null, 2))}</pre></details>
+  <div class="row" style="margin-top:12px"><button class="b big" onclick="answer('${j.id}',true)">✅ Pode sim</button>
+  <button class="b bad big" onclick="answer('${j.id}',false)">✋ Não</button></div>`);
 }
 async function answer(id, ok) { closeModal(); approvalShown = null; await api(`/api/jobs/${id}/approve`, 'POST', {ok}); }
 
@@ -128,7 +148,7 @@ async function send() {
       box.textContent = (j.status === 'waiting_approval' ? '⚠️ Aguardando sua autorização\n' : '⏳ Trabalhando...\n') + calls;
     });
     const ans = typeof j.result === 'string' ? j.result : JSON.stringify(j.result);
-    box.textContent = (j.status === 'error' ? '❌ ' : '') + ans;
+    box.textContent = j.status === 'error' ? '❌ ' + (j.plain_error || ans) : ans;
     HISTORY.push({role:'user', content: task}, {role:'assistant', content: ans});
   } catch (e) { box.textContent = '❌ ' + e.message; }
   $('#send').disabled = false;
@@ -237,17 +257,18 @@ async function viewAdmin() {
   const [us, au] = await Promise.all([api('/api/users'), api('/api/audit')]);
   $('#main').innerHTML = `<h2>Usuários e auditoria</h2>
   <div class="card"><b>Usuários</b> <span class="mut small">${ME.auth_enabled ? '' : '— nenhum usuário cadastrado: modo local sem login. Crie o primeiro (admin) para ativar o login.'}</span>
-  <table>${us.map(u => `<tr><td>${esc(u.name)}</td><td>${esc(u.role)}</td><td class="small">${u.tools ? 'ferramentas: ' + esc(u.tools.join(', ')) : 'todas as ferramentas'}</td>
+  <table>${us.map(u => `<tr><td>${esc(u.name)}</td><td>${esc(u.role)}</td><td class="small">${u.reviewer || u.role === 'admin' ? '🎓 padrinho · ' : ''}${u.tools ? 'ferramentas: ' + esc(u.tools.join(', ')) : 'todas as ferramentas'}</td>
   <td><button class="b bad" onclick="delUser('${esc(u.name)}')">✕</button></td></tr>`).join('')}</table>
   <div class="row" style="margin-top:10px"><input id="nu" placeholder="nome"><input id="np" type="password" placeholder="senha (8+)">
   <select id="nr"><option>operator</option><option>admin</option><option>viewer</option></select>
-  <input id="nt" placeholder="ferramentas permitidas (opcional, separadas por vírgula)"><button class="b" onclick="addUser()">Criar</button></div></div>
+  <input id="nt" placeholder="ferramentas permitidas (opcional, separadas por vírgula)">
+  <label style="margin:0;white-space:nowrap"><input type="checkbox" id="nrv" style="width:auto"> padrinho (revisa bots)</label><button class="b" onclick="addUser()">Criar</button></div></div>
   <div class="card"><b>Auditoria (últimos 200)</b><table>${au.map(a => `<tr><td class="small">${esc(a.ts)}</td><td>${esc(a.user)}</td><td>${esc(a.action)}</td>
   <td class="small">${esc(a.tool || a.workflow || a.task || a.name || '')}${a.ok === false ? ' ❌ ' + esc(a.error) : ''}</td></tr>`).join('')}</table></div>`;
 }
 async function addUser() {
   const t = $('#nt').value.split(',').map(s => s.trim()).filter(Boolean);
-  try { await api('/api/users', 'POST', {name: $('#nu').value, password: $('#np').value, role: $('#nr').value, tools: t.length ? t : null});
+  try { await api('/api/users', 'POST', {name: $('#nu').value, password: $('#np').value, role: $('#nr').value, tools: t.length ? t : null, reviewer: $('#nrv').checked});
     toast('Usuário criado. O login passa a ser exigido.'); location.reload(); } catch (e) { toast(e.message); }
 }
 async function delUser(n) { if (confirm('Remover ' + n + '?')) { try { await api('/api/users/' + n, 'DELETE'); viewAdmin(); } catch (e) { toast(e.message); } } }
@@ -255,39 +276,170 @@ async function delUser(n) { if (confirm('Remover ' + n + '?')) { try { await api
 /* ---------- Escritório ---------- */
 function viewOffice() { $('#main').innerHTML = '<iframe src="/office" title="Escritório"></iframe>'; }
 
-/* ---------- Bots ---------- */
-const STATUS = {draft: ['rascunho', 'queued'], validated: ['validado', 'running'], active: ['ativo', 'done'], paused: ['pausado', '']};
+/* ---------- Bots (modo simples) ---------- */
+const STATUS = {draft: ['rascunho', 'queued'], validated: ['conferido', 'running'], active: ['trabalhando', 'done'], paused: ['pausado', '']};
+const NEXT_ICON = {validate: '🔎', rehearse: '🎭', submit_review: '📨', waiting_review: '⏳', activate: '🚀', done: '✅'};
 async function viewBots() {
-  const [bs, wfs] = await Promise.all([api('/api/bots'), api('/api/workflows')]);
+  const [bs, wfs, creds, revs] = await Promise.all([api('/api/bots'), api('/api/workflows'), api('/api/credentials'), api('/api/reviews')]);
   const teams = [...new Set(bs.map(b => b.team))];
   $('#main').innerHTML = `<h2>Bots</h2>
-  ${readonly() ? '' : `<div class="card"><b>✨ Contratar um bot</b>
-   <p class="mut small">Descreva o trabalho em português: a IA escreve o código do bot, o sistema valida e corrige até ficar válido. Você revisa antes de ativar.</p>
-   <div class="row"><input id="bn" placeholder="Nome (ex.: Conciliador Bancário)" style="flex:2">
-   <input id="bt" placeholder="Time (ex.: Financeiro)" list="teams" style="flex:1"><datalist id="teams">${teams.map(t => `<option>${esc(t)}`).join('')}</datalist>
+  ${revs.length ? `<div class="card" style="border-color:var(--warn)"><b>🎓 Aguardando sua revisão (${revs.length})</b>
+    ${revs.map(r => `<div class="row" style="margin-top:8px"><span style="flex:1"><b>${esc(r.name)}</b> <span class="mut small">de ${esc(r.owner)} · ${r.steps.length} passos${r.review.note ? ' · “' + esc(r.review.note) + '”' : ''}</span></span>
+    <button class="b" onclick='openBot(${JSON.stringify(r.id)})'>Revisar</button></div>`).join('')}</div>` : ''}
+  ${readonly() ? '' : `<div class="hero"><h3>🎬 Ensinar um robô novo</h3><div class="mut">Você faz a tarefa uma vez, o robô observa e aprende. Não precisa saber programar.</div>
+   <div class="how"><div><b>1</b>Dê um nome e diga em qual site ele trabalha</div><div><b>2</b>Uma janela abre: faça a tarefa normalmente</div>
+   <div><b>3</b>Clique em <i>Terminei</i>. O robô mostra os passos que aprendeu</div><div><b>4</b>Faça um ensaio e peça a revisão do padrinho</div></div>
+   <div class="row"><input id="tn" placeholder="Nome do robô (ex.: Baixar notas do fornecedor)" style="flex:2">
+   <input id="tu" placeholder="Site (ex.: https://portal.fornecedor.com)" style="flex:2">
+   <input id="tt" placeholder="Time" list="teams" style="flex:1"><datalist id="teams">${teams.map(t => `<option>${esc(t)}`).join('')}</datalist></div>
+   <div class="row" style="margin-top:8px"><select id="tc" style="flex:0 1 330px"><option value="">O site pede login? Escolha seu acesso (opcional)</option>
+   ${creds.map(c => `<option value="${esc(c.name)}">🔑 ${esc(c.label || c.name)}</option>`).join('')}</select>
+   <button class="b big" onclick="teach()">🎬 Começar a ensinar</button></div>
+   <details style="margin-top:12px"><summary class="mut small">Outras formas de criar (para quem já tem prática)</summary>
+   <div class="row" style="margin-top:8px"><input id="bn" placeholder="Nome" style="flex:1"><input id="bt" placeholder="Time" list="teams" style="flex:1">
    <select id="br" style="flex:0 0 130px"><option value="worker">Funcionário</option><option value="boss">Chefe</option></select></div>
-   <label>O que ele faz?</label><textarea id="bd" rows="3" placeholder="Ex.: todo dia entra no portal do banco, baixa o extrato, cruza com a planilha contas.xlsx e manda as diferenças por e-mail para o financeiro"></textarea>
-   <div class="row" style="margin-top:8px"><button class="b" id="bgen" onclick="genBot()">✨ Gerar código com IA</button>
-   <button class="b sec" onclick="newBot()">Escrever do zero</button>
-   <select id="bw" style="flex:0 1 240px"><option value="">…ou partir de uma automação</option>${wfs.map(w => `<option>${esc(w.name)}</option>`).join('')}</select></div></div>`}
-  <div class="grid">${bs.map(b => { const [st, cls] = STATUS[b.status] || [b.status, ''];
+   <textarea id="bd" rows="2" placeholder="Descreva o que ele faz, para a IA escrever" style="margin-top:6px"></textarea>
+   <div class="row" style="margin-top:6px"><button class="b sec" id="bgen" onclick="genBot()">✨ Descrever para a IA</button><button class="b sec" onclick="newBot()">Escrever o código</button>
+   <select id="bw" style="flex:0 1 240px"><option value="">…ou partir de uma automação</option>${wfs.map(w => `<option>${esc(w.name)}</option>`).join('')}</select></div></details></div>`}
+  <div class="grid">${bs.map(b => { const [st, cls] = STATUS[b.status] || [b.status, ''], nx = b.next || {};
+    const canRun = !readonly() && b.status !== 'draft' && (b.status === 'active' || b.can_edit);
     return `<div class="card"><div class="row"><span style="width:12px;height:12px;border-radius:3px;background:${esc(b.color)};display:inline-block"></span>
     <b>${esc(b.name)}</b> <span class="tag ${cls}">${st}</span></div>
-    <div class="mut small">${b.role === 'boss' ? '👔 chefe' : '🤖 funcionário'} · ${esc(b.team)} · dono: ${esc(b.owner)}${b.origin !== 'manual' ? ' · origem: ' + esc(b.origin) : ''}</div>
+    <div class="mut small">${b.role === 'boss' ? '👔 chefe' : '🤖 funcionário'} · ${esc(b.team)} · de ${esc(b.owner)}</div>
     <div class="small" style="margin:6px 0">${esc(b.description) || '—'}</div>
-    <div class="mut small">execuções ${b.stats.runs} · ok ${b.stats.ok} · erros ${b.stats.errors}${b.stats.last_run ? ' · última ' + esc(b.stats.last_run) : ''}</div>
-    ${b.validation && b.validation.errors && b.validation.errors.length ? `<div class="small" style="color:var(--bad)">⚠ ${b.validation.errors.length} erro(s) de validação</div>` : ''}
-    ${b.validation && b.validation.risky_tools && b.validation.risky_tools.length ? `<div class="small" style="color:var(--warn)">pede autorização: ${esc(b.validation.risky_tools.join(', '))}</div>` : ''}
+    <div class="mut small">trabalhou ${b.stats.runs}× · ${b.stats.errors ? b.stats.errors + ' com problema' : 'sem problemas'}</div>
+    ${b.can_edit && nx.step !== 'done' ? `<div class="note ${nx.step === 'waiting_review' ? 'warn' : ''}" style="margin-top:8px">${NEXT_ICON[nx.step] || ''} Próximo: <b>${esc(nx.text)}</b></div>` : ''}
     <div class="row" style="margin-top:8px">
-      <button class="b" ${readonly() || b.status === 'draft' || (b.status !== 'active' && !b.can_edit) ? 'disabled' : ''} onclick='runBot(${JSON.stringify(b.id)})'>▶ Executar</button>
-      ${b.can_edit ? `<button class="b sec" onclick='editBot(${JSON.stringify(b.id)})'>Código</button>
-      ${b.status === 'draft' ? `<button class="b sec" onclick='validateBot(${JSON.stringify(b.id)})'>✔ Validar</button>` : ''}
-      ${b.status === 'validated' || b.status === 'paused' ? `<button class="b sec" onclick='activeBot(${JSON.stringify(b.id)},true)'>Ativar</button>` : ''}
-      ${b.status === 'active' ? `<button class="b sec" onclick='activeBot(${JSON.stringify(b.id)},false)'>Pausar</button>
-        <button class="b sec" onclick='schedFlow(${JSON.stringify(b.id)},"bot")'>⏰</button>` : ''}` : ''}
-    </div></div>`; }).join('') || '<p class="mut">Nenhum bot ainda. Contrate o primeiro acima (ou rode <code>emanusia demo</code> para ver um exemplo).</p>'}</div>`;
+      ${b.can_edit ? `<button class="b" onclick='openBot(${JSON.stringify(b.id)})'>Abrir</button>` : ''}
+      <button class="b ${b.can_edit ? 'sec' : ''}" ${canRun ? '' : 'disabled'} onclick='runBot(${JSON.stringify(b.id)})'>▶ Executar</button>
+      ${b.can_edit && b.status === 'active' ? `<button class="b sec" onclick='activeBot(${JSON.stringify(b.id)},false)'>Pausar</button>
+        <button class="b sec" title="Agendar" onclick='schedFlow(${JSON.stringify(b.id)},"bot")'>⏰</button>` : ''}
+    </div></div>`; }).join('') || '<p class="mut">Nenhum robô ainda. Ensine o primeiro acima!</p>'}</div>`;
   if ($('#bw')) $('#bw').onchange = async e => { if (!e.target.value) return; const y = (await api('/api/workflows/' + e.target.value)).yaml; botEditor(null, y); };
 }
+
+/* --- ensinar mostrando --- */
+async function teach() {
+  const name = $('#tn').value.trim(), url = $('#tu').value.trim();
+  if (!name) return toast('Dê um nome para o robô.');
+  if (!url) return toast('Diga em qual site ele vai trabalhar.');
+  try {
+    const j = await api('/api/teach', 'POST', {name, url: /^https?:|^file:/.test(url) ? url : 'https://' + url, team: $('#tt').value || 'Geral', credential: $('#tc').value});
+    const bar = document.createElement('div'); bar.className = 'recbar';
+    bar.innerHTML = `<span style="font-size:22px">🔴</span><div><b>Estou aprendendo com você</b><div class="small" style="opacity:.8">Faça a tarefa na janela do navegador que abriu. Senhas não são gravadas.</div></div>
+      <button class="b big" style="background:#22c7a9" id="tdone">✅ Terminei</button>`;
+    document.body.append(bar);
+    $('#tdone').onclick = async () => { $('#tdone').disabled = true; $('#tdone').textContent = 'Salvando...'; await api(`/api/jobs/${j.id}/stop`, 'POST'); };
+    const r = await follow(j.id, () => {});
+    bar.remove();
+    if (r.status === 'error') return toast(r.plain_error || r.result);
+    toast(`Pronto! O robô "${r.result.name}" aprendeu ${r.result.code.steps.length} passos. Confira se está tudo certo.`);
+    viewBots(); openBot(r.result.id);
+  } catch (e) { toast(e.message); }
+}
+
+/* --- página do robô: passos em português, ensaio, revisão --- */
+let BOT = null;
+async function openBot(id) {
+  const [b, d] = await Promise.all([api('/api/bots/' + id), api(`/api/bots/${id}/steps`)]);
+  BOT = {b, d};
+  const nx = d.next, reh = d.rehearsal_current ? d.rehearsal : null, rv = d.review || {};
+  const stages = [['Ensinado', true], ['Conferido', nx.step !== 'validate'], ['Ensaio', !['validate', 'rehearse'].includes(nx.step) || !d.needs_rehearsal],
+    ['Revisão', ['activate', 'done'].includes(nx.step)], ['Trabalhando', nx.step === 'done']];
+  const cur = stages.findIndex(s => !s[1]);
+  const shot = {}; (reh ? reh.steps : []).forEach(s => { shot[s.path] = s; });
+  const reviewing = !b.can_edit && ME.user.reviewer;
+  modal(`<h2>${esc(b.name)}</h2><div class="mut small">${b.role === 'boss' ? '👔 chefe' : '🤖 funcionário'} · ${esc(b.team)} · de ${esc(b.owner)}</div>
+  <div class="track">${stages.map((s, i) => `<span class="${s[1] ? 'ok' : i === cur ? 'now' : ''}">${s[1] ? '✓ ' : ''}${s[0]}</span>`).join('')}</div>
+  ${d.plain_errors.length ? `<div class="note bad"><b>O robô precisa de ajuste:</b>${d.plain_errors.map(e => `<div>• ${esc(e)}</div>`).join('')}</div>` : ''}
+  ${rv.status === 'changes' ? `<div class="note warn">🎓 <b>${esc(rv.by)}</b> pediu ajustes: “${esc(rv.note)}”</div>` : ''}
+  ${rv.status === 'pending' && reviewing ? `<div class="note warn">🎓 <b>${esc(b.owner)}</b> pediu sua revisão${rv.note ? ': “' + esc(rv.note) + '”' : ''}. Confira os passos e o ensaio abaixo.</div>` : ''}
+  ${reh ? `<div class="note ${reh.ok ? 'ok' : 'bad'}">🎭 Ensaio de ${esc(reh.at)}: ${reh.ok ? '<b>deu tudo certo!</b>' : '<b>parou num passo.</b> ' + esc(reh.error || '')}</div>` : ''}
+  <b>O que o robô faz</b><ol class="steps">${d.steps.map(s => stepHtml(s, shot[s.path], b.can_edit, reh)).join('')}</ol>
+  ${b.can_edit ? `<button class="b sec" onclick="addStepHint()">+ Adicionar passo</button>` : ''}
+  ${d.params.length ? `<p><b>Informações que podem mudar a cada vez</b></p>${d.params.map((p, i) => `<label>${esc(p.label)}</label>
+    <input data-param="${esc(p.name)}" data-kind="${typeof p.value}" value="${esc(typeof p.value === 'object' ? JSON.stringify(p.value) : p.value)}" ${b.can_edit ? '' : 'disabled'}>`).join('')}
+    ${b.can_edit ? '<p><button class="b sec" onclick="saveParams()">Salvar informações</button></p>' : ''}` : ''}
+  <div class="row" style="margin-top:16px">${reviewing ? `<button class="b big" onclick="decide(true)">✅ Aprovar e colocar para trabalhar</button>
+    <button class="b bad" onclick="decide(false)">Pedir ajustes</button>` : b.can_edit ? nextButton(nx) : ''}
+    ${b.can_edit && b.status !== 'draft' ? `<button class="b sec" onclick='runBot(${JSON.stringify(b.id)})'>▶ Executar agora</button>` : ''}</div>
+  ${b.can_edit ? `<p class="small" style="margin-top:14px"><a href="#" onclick='editBot(${JSON.stringify(b.id)});return false' style="color:var(--mut)">Modo avançado (código)</a> ·
+    <a href="#" onclick='delBot(${JSON.stringify(b.id)});return false' style="color:var(--bad)">Demitir robô</a></p>` : ''}`);
+  $('#mbody').style.width = 'min(760px,94vw)';
+}
+function stepHtml(s, r, edit, reh) {
+  if (s.header) return `<li class="st" style="margin-left:${s.depth * 22}px;background:none;border-style:dashed"><div class="tx mut">${esc(s.text)}</div></li>`;
+  const top = !s.path.includes('.'), bad = r && !r.ok;
+  return `<li class="st ${bad ? 'bad' : ''}" style="margin-left:${s.depth * 22}px"><div class="num">${r ? (r.ok ? '✓' : '✖') : esc(s.path.split('.').pop())}</div>
+  <div class="tx"><div>${s.icon} ${esc(s.text)}</div>
+  ${bad ? `<div class="small" style="color:var(--bad);margin-top:4px">${esc(r.error)}</div>
+    ${s.fixable && top && edit ? `<button class="b" style="margin-top:6px" onclick="fixStep('${s.path}')">👉 Mostrar onde fica</button>` : ''}` : ''}
+  ${r && r.shot ? `<img src="/api/bots/${encodeURIComponent(BOT.b.id)}/shots/${r.shot}?t=${encodeURIComponent(reh.at)}" onclick="window.open(this.src)" alt="print do passo">` : ''}</div>
+  ${edit && top ? `<div class="acts"><button title="Editar" onclick="editStep('${s.path}')">✏️</button><button title="Subir" onclick="moveStep('${s.path}',-1)">↑</button>
+    <button title="Descer" onclick="moveStep('${s.path}',1)">↓</button><button title="Apagar" onclick="delStep('${s.path}')">🗑</button></div>` : ''}</li>`;
+}
+function nextButton(nx) {
+  const act = {validate: 'checkBot()', rehearse: 'rehearse()', submit_review: 'askReview()', activate: 'goLive()'}[nx.step];
+  return act ? `<button class="b big" onclick="${act}">${NEXT_ICON[nx.step]} ${esc(nx.text)}</button>` : `<span class="note ${nx.step === 'done' ? 'ok' : 'warn'}">${NEXT_ICON[nx.step]} ${esc(nx.text)}</span>`;
+}
+async function saveCode(code) { await api('/api/bots/' + BOT.b.id, 'PUT', {code}); await api(`/api/bots/${BOT.b.id}/validate`, 'POST'); openBot(BOT.b.id); }
+function topSteps() { return JSON.parse(JSON.stringify(BOT.b.code.steps || [])); }
+async function moveStep(p, dir) { const st = topSteps(), i = +p - 1, k = i + dir; if (k < 0 || k >= st.length) return; [st[i], st[k]] = [st[k], st[i]]; await saveCode({...BOT.b.code, steps: st}); }
+async function delStep(p) { if (!confirm('Apagar este passo?')) return; const st = topSteps(); st.splice(+p - 1, 1); await saveCode({...BOT.b.code, steps: st}); }
+function editStep(p) {
+  const st = topSteps(), s = st[+p - 1], a = s.args || {}, F = BOT.d.fields;
+  const simple = Object.entries(a).filter(([k, v]) => k !== 'selector' && (typeof v !== 'object' || v === null));
+  const complex = Object.entries(a).filter(([k, v]) => typeof v === 'object' && v !== null);
+  modal(`<h2>✏️ Editar passo ${esc(p)}</h2>
+  ${'label' in s || a.selector ? `<label>Nome do botão/campo (como aparece na tela)</label><input id="sl" value="${esc(s.label || '')}">` : ''}
+  ${simple.map(([k, v]) => `<label>${esc(F[k] || k)}</label><input data-arg="${esc(k)}" value="${esc(v)}">`).join('')}
+  <details style="margin-top:10px"><summary class="mut small">Avançado</summary>
+   ${a.selector !== undefined ? `<label>Onde fica (seletor)</label><input data-arg="selector" value="${esc(a.selector)}">` : ''}
+   ${complex.map(([k, v]) => `<label>${esc(F[k] || k)}</label><textarea data-json="${esc(k)}" rows="3">${esc(JSON.stringify(v))}</textarea>`).join('')}</details>
+  <div class="row" style="margin-top:12px"><button class="b" onclick="saveStep('${p}')">Salvar</button><button class="b sec" onclick="openBot(BOT.b.id)">Cancelar</button></div>`);
+}
+async function saveStep(p) {
+  const st = topSteps(), s = st[+p - 1]; s.args = s.args || {};
+  document.querySelectorAll('[data-arg]').forEach(i => { const v = i.value; s.args[i.dataset.arg] = /^-?\d+(\.\d+)?$/.test(v) && typeof s.args[i.dataset.arg] === 'number' ? +v : v; });
+  try { document.querySelectorAll('[data-json]').forEach(i => { s.args[i.dataset.json] = JSON.parse(i.value); }); } catch { return toast('Um campo avançado ficou mal escrito.'); }
+  if ($('#sl')) { if ($('#sl').value.trim()) s.label = $('#sl').value.trim(); else delete s.label; }
+  await saveCode({...BOT.b.code, steps: st});
+}
+function addStepHint() { toast('Para adicionar passos mostrando, o jeito mais fácil é ensinar de novo. Para algo específico, use o Modo avançado ou peça ajuda ao padrinho.'); }
+async function saveParams() {
+  const params = {...(BOT.b.code.params || {})};
+  document.querySelectorAll('[data-param]').forEach(i => { params[i.dataset.param] = typed(i); });
+  await saveCode({...BOT.b.code, params});
+}
+async function checkBot() { const r = await api(`/api/bots/${BOT.b.id}/validate`, 'POST'); if (!r.ok) toast('Ainda há ajustes a fazer (veja em vermelho).'); openBot(BOT.b.id); }
+async function rehearse() {
+  modal(`<h2>🎭 Ensaio</h2><p style="font-size:16px">O robô está fazendo a tarefa de verdade e tirando um print de cada passo.</p><p class="mut">Se ele pedir permissão para algo importante, você decide.</p>`);
+  try {
+    const j = await api(`/api/bots/${BOT.b.id}/rehearse`, 'POST', {params: {}});
+    const r = await follow(j.id, () => {});
+    if (r.status === 'error') toast(r.plain_error || r.result);
+  } catch (e) { toast(e.message); }
+  openBot(BOT.b.id);
+}
+async function fixStep(path) {
+  modal(`<h2>👉 Mostrar onde fica</h2><p style="font-size:16px">Uma janela do navegador vai abrir e o robô vai refazer os passos anteriores.</p>
+  <p>Quando aparecer o aviso <b>“Clique no lugar certo para me ensinar”</b>, clique no botão ou campo correto.</p>`);
+  try { const j = await api(`/api/bots/${BOT.b.id}/fix`, 'POST', {path}); const r = await follow(j.id, () => {});
+    if (r.status === 'error') toast(r.plain_error || r.result); else toast(`Aprendi! Agora o passo é: ${r.result.text}. Faça um novo ensaio.`); } catch (e) { toast(e.message); }
+  openBot(BOT.b.id);
+}
+async function askReview() {
+  const note = prompt('Quer deixar um recado para o padrinho? (opcional)') ?? null; if (note === null) return;
+  try { await api(`/api/bots/${BOT.b.id}/review/submit`, 'POST', {note}); toast('Enviado! O padrinho vai revisar e colocar para trabalhar.'); } catch (e) { toast(e.message); }
+  openBot(BOT.b.id); viewBots();
+}
+async function decide(ok) {
+  const note = ok ? '' : prompt('O que precisa ser ajustado?'); if (!ok && !note) return;
+  try { await api(`/api/bots/${BOT.b.id}/review`, 'POST', {approve: ok, note}); toast(ok ? 'Aprovado! O robô já está trabalhando.' : 'Pedido de ajuste enviado.'); closeModal(); viewBots(); }
+  catch (e) { toast(e.message); }
+}
+async function goLive() { try { await api(`/api/bots/${BOT.b.id}/active`, 'POST', {active: true}); toast('O robô começou a trabalhar! 🎉'); closeModal(); viewBots(); } catch (e) { toast(e.message); } }
+
 function newBot() { botEditor(null, 'params: {}\nsteps:\n  - log: "olá, sou um bot novo"\n'); }
 async function genBot() {
   const d = $('#bd').value.trim(); if (!$('#bn').value.trim()) return toast('Dê um nome ao bot.');
@@ -331,18 +483,21 @@ async function saveBot(id, origin) {
     else { $('#erep').innerHTML = report(rep); if (!id) { closeModal(); viewBots(); toast('Bot salvo como rascunho: corrija os erros em "Código".'); } }
   } catch (e) { toast(e.message); }
 }
-async function validateBot(id) { const r = await api(`/api/bots/${id}/validate`, 'POST'); toast(r.ok ? 'Validado!' : 'Erros:\n- ' + r.errors.join('\n- ')); viewBots(); }
 async function activeBot(id, on) { try { await api(`/api/bots/${id}/active`, 'POST', {active: on}); viewBots(); } catch (e) { toast(e.message); } }
-async function delBot(id) { if (confirm('Demitir este bot?')) { await api('/api/bots/' + id, 'DELETE'); closeModal(); viewBots(); } }
-function runBot(id) {
-  modal(`<h2>Executar bot</h2><label>Parâmetros (JSON, opcional)</label><textarea id="rp" rows="3">{}</textarea>
-  <label>Ações de risco</label><select id="risk"><option value="">Perguntar a cada ação</option><option value="true">Autorizar todas desta execução</option><option value="false">Negar todas</option></select>
-  <p><button class="b" onclick='doRunBot(${JSON.stringify(id)})'>▶ Executar</button></p>`);
+async function delBot(id) { if (confirm('Demitir este robô?')) { await api('/api/bots/' + id, 'DELETE'); closeModal(); viewBots(); } }
+async function runBot(id) {
+  const b = await api('/api/bots/' + id);
+  modal(`<h2>▶ ${esc(b.name)}</h2>${b.params.length ? '<p class="mut">Confira as informações desta vez:</p>' : '<p>Tudo pronto para começar.</p>'}
+  ${b.params.map(p => `<label>${esc(p.label)}</label><input data-run="${esc(p.name)}" data-kind="${typeof p.value}" value="${esc(typeof p.value === 'object' ? JSON.stringify(p.value) : p.value)}">`).join('')}
+  <label>Se o robô precisar fazer algo importante (enviar, aprovar, apagar)</label>
+  <select id="risk"><option value="">Me pergunte na hora</option><option value="true">Pode fazer sem perguntar, desta vez</option><option value="false">Não faça nada importante</option></select>
+  <p><button class="b big" onclick='doRunBot(${JSON.stringify(id)})'>▶ Começar</button></p>`);
 }
 async function doRunBot(id) {
-  let params; try { params = JSON.parse($('#rp').value || '{}'); } catch { return toast('Parâmetros: JSON inválido'); }
+  const params = {}; document.querySelectorAll('[data-run]').forEach(i => { params[i.dataset.run] = typed(i); });
   const r = $('#risk').value; closeModal();
-  try { const j = await api(`/api/bots/${id}/run`, 'POST', {params, approve_risky: r === '' ? null : r === 'true'}); go('office'); follow(j.id, () => {}); }
+  try { const j = await api(`/api/bots/${id}/run`, 'POST', {params, approve_risky: r === '' ? null : r === 'true'}); go('office');
+    follow(j.id, () => {}).then(x => { if (x.status === 'error') toast('O robô parou: ' + (x.plain_error || x.result)); }); }
   catch (e) { toast(e.message); }
 }
 

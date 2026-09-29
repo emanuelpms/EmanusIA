@@ -38,11 +38,12 @@ def test_recorder_turns_browsing_into_workflow(headless):
         p.wait_for_timeout(200)
         b.close()
     steps = rec.steps()
-    assert steps[0] == {"tool": "web_open", "args": {"url": page_file.as_uri()}}
-    assert {"tool": "web_fill", "args": {"selector": "input[name=\"user\"]", "value": "maria"}} in steps
-    assert {"tool": "web_fill_secret", "args": {"selector": "input[name=\"pwd\"]", "env_var": "SENHA_PWD"}} in steps
-    assert {"tool": "web_fill", "args": {"selector": "select[name=\"tipo\"]", "value": "b"}} in steps
-    assert steps[-1] == {"tool": "web_click", "args": {"selector": "#go"}}
+    core = [{"tool": s["tool"], "args": s["args"]} for s in steps]  # sem os rótulos humanos
+    assert core[0] == {"tool": "web_open", "args": {"url": page_file.as_uri()}}
+    assert {"tool": "web_fill", "args": {"selector": "input[name=\"user\"]", "value": "maria"}} in core
+    assert {"tool": "web_fill_secret", "args": {"selector": "input[name=\"pwd\"]", "env_var": "SENHA_PWD"}} in core
+    assert {"tool": "web_select", "args": {"selector": "select[name=\"tipo\"]", "value": "b"}} in core
+    assert core[-1] == {"tool": "web_click", "args": {"selector": "#go"}} and steps[-1]["label"] == "Entrar"
     assert "SEGREDO123" not in yaml.safe_dump(steps)  # senha nunca é gravada
     rec.save("login-teste")
     assert "login-teste" in registry.call("list_workflows", {})

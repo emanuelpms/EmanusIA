@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Callable
 
-from . import auth, bots, events, scheduler
+from . import auth, bots, events, plain, scheduler
 from .agent import Agent
 from .llm import OllamaClient
 from .tools import load_all
@@ -30,6 +30,7 @@ class Job:
     events: list = field(default_factory=list)
     result: object = None
     pending: dict | None = None
+    plain_error: str | None = None
     created: float = field(default_factory=time.time)
     _approval: threading.Event = field(default_factory=threading.Event, repr=False)
     _approved: bool = False
@@ -37,7 +38,8 @@ class Job:
 
     def public(self, full: bool = True) -> dict:
         d = {"id": self.id, "kind": self.kind, "title": self.title, "user": self.user,
-             "bot": self.bot, "status": self.status, "pending": self.pending, "created": self.created}
+             "bot": self.bot, "status": self.status, "pending": self.pending, "created": self.created,
+             "plain_error": self.plain_error}
         if full:
             d.update(events=self.events[-200:], result=self.result)
         return d
@@ -55,7 +57,8 @@ class JobManager:
         def confirm(name: str, args: dict) -> bool:
             if auto is not None:
                 return auto
-            job.pending, job.status = {"tool": name, "args": args}, "waiting_approval"
+            job.pending = {"tool": name, "args": args, "text": plain.describe_action(name, args)}
+            job.status = "waiting_approval"
             events.emit("waiting", bot=job.bot or ASSISTANT, job=job.id, text=f"aprovar {name}?")
             job._approval.clear()
             got = job._approval.wait(APPROVAL_TIMEOUT)
@@ -78,6 +81,7 @@ class JobManager:
                 job.status = "done"
             except Exception as e:
                 job.result, job.status = f"{type(e).__name__}: {e}", "error"
+                job.plain_error = plain.explain_error(job.result)
                 auth.audit(job.user, "job_error", job=job.id, kind=job.kind, error=str(e))
             if actor:
                 events.emit("job_done", bot=actor, job=job.id, ok=job.status == "done",
@@ -151,6 +155,34 @@ class JobManager:
             bots.record_run(fresh.id, True)
             return res
         return self._start(job, fn)
+
+    def submit_teach(self, url: str, name: str, user: auth.User, team: str = "Geral",
+                     description: str = "", credential: str = "") -> Job:
+        from .rehearsal import teach
+        job = Job("teach", f"Ensinando: {name}", user.name)
+        auth.audit(user.name, "teach_start", url=url, name=name)
+        return self._start(job, lambda j: teach(url, name, user, j._stop, team, description, credential).public(),
+                           own_thread=True)
+
+    def submit_rehearsal(self, bot_id: str, user: auth.User, params: dict | None = None) -> Job:
+        from .rehearsal import rehearse
+        b = bots.get_bot(bot_id)
+        if b is None:
+            raise KeyError(bot_id)
+        job = Job("rehearsal", f"Ensaio: {b.name}", user.name)  # sem `bot`: o ensaio emite os eventos
+
+        def fn(j: Job):
+            return rehearse(bot_id, user, self._confirm_for(j, None), params,
+                            emit=lambda k, ev: j.events.append(ev))
+        return self._start(job, fn)
+
+    def submit_fix(self, bot_id: str, path: str, user: auth.User) -> Job:
+        from .rehearsal import fix_step
+        b = bots.get_bot(bot_id)
+        if b is None:
+            raise KeyError(bot_id)
+        job = Job("fix", f"Mostrando onde fica: {b.name}", user.name)
+        return self._start(job, lambda j: fix_step(bot_id, path, user, j._stop, self._confirm_for(j, None)))
 
     def submit_generate(self, description: str, user: auth.User) -> Job:
         from .botgen import generate

@@ -46,7 +46,7 @@ _VAR = re.compile(r"\{\{\s*([\w.]+)\s*\}\}")
 _SECRET_ARG = re.compile(r"pass|senha|secret|token|api_?key", re.I)
 STEP_KEYS = {"tool", "if", "for_each", "while", "try", "set", "call", "call_bot", "log", "sleep", "fail"}
 KNOWN_KEYS = STEP_KEYS | {"args", "save_as", "retry", "retry_delay", "on_error", "then", "else",
-                          "as", "steps", "max", "catch", "params", "name", "comment"}
+                          "as", "steps", "max", "catch", "params", "name", "comment", "label"}
 
 
 class WorkflowError(Exception):
@@ -316,10 +316,19 @@ def _check_tool(s, where, user, rep):
 
 # ------------------------------------------------------------------ execução
 class Runner:
-    def __init__(self, user: auth.User, confirm=None, bot: str | None = None, emit=None, depth=0):
+    def __init__(self, user: auth.User, confirm=None, bot: str | None = None, emit=None, depth=0,
+                 on_step=None):
         self.user, self.confirm, self.bot, self.depth = user, confirm, bot, depth
         self._emit = emit
         self.log: list[dict] = []
+        # on_step(caminho, passo, ok, resultado|erro): usado pelo ensaio (print + status de cada passo)
+        self.on_step = on_step
+        self._path: list[int] = []
+        self.failed_at: str | None = None  # caminho do passo que interrompeu a execução ("3", "5.2")
+
+    @property
+    def path(self) -> str:
+        return ".".join(map(str, self._path))
 
     def emit(self, kind: str, **data):
         ev = events.emit(kind, bot=self.bot, **data)
@@ -343,10 +352,18 @@ class Runner:
                             and isinstance(v, str | int | float | bool)}}
 
     def _steps(self, steps: list, ctx: dict, wf_name: str):
-        for s in steps:
-            if "tool" in s and "if" in s and not safe_eval(s["if"], ctx):
-                continue
-            self._step(s, ctx, wf_name)
+        for i, s in enumerate(steps, 1):
+            self._path.append(i)
+            try:
+                if "tool" in s and "if" in s and not safe_eval(s["if"], ctx):
+                    continue
+                self._step(s, ctx, wf_name)
+            except Exception:
+                if self.failed_at is None:
+                    self.failed_at = self.path
+                raise
+            finally:
+                self._path.pop()
 
     def _step(self, s: dict, ctx: dict, wf_name: str):
         if "tool" in s:
@@ -374,6 +391,7 @@ class Runner:
             try:
                 self._steps(s["try"], ctx, wf_name)
             except Exception as e:
+                self.failed_at = None  # erro tratado pelo catch: não interrompe
                 ctx["erro"] = f"{type(e).__name__}: {e}"
                 self.emit("log", text=f"erro tratado: {e}"[:120])
                 self._steps(s.get("catch") or [], ctx, wf_name)
@@ -448,11 +466,15 @@ class Runner:
                 auth.audit(self.user.name, "tool", tool=t.name, args=args, workflow=wf_name,
                            bot=self.bot, ok=False, error=str(e))
                 self.log.append({"tool": t.name, "ok": False, "error": str(e)[:300]})
+                if self.on_step:
+                    self.on_step(self.path, s, False, f"{type(e).__name__}: {e}")
                 if s.get("on_error") != "continue":
                     raise
                 result = {"error": f"{type(e).__name__}: {e}"}
         if ok:
             self.log.append({"tool": t.name, "ok": True})
+            if self.on_step:
+                self.on_step(self.path, s, True, result)
             auth.audit(self.user.name, "tool", tool=t.name, args=args, workflow=wf_name,
                        bot=self.bot, ok=True)
         if s.get("save_as"):

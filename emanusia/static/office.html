@@ -386,6 +386,8 @@ function onEvent(e) {
       feed(`🔁 ${n} passou trabalho para <b>${esc(tg ? tg.name : e.target)}</b>`); break; }
     case 'bot_created': feed(`🎉 ${n || 'Novo bot'} foi contratado(a)!`); break;
     case 'learned': if (c) c.say('💡 aprendi!', 4000, '#ffcf5a'); feed(`💡 ${esc(e.text)}`); break;
+    case 'review_requested': if (c) c.say('📨 revisão?', 4000, '#ffcf5a'); feed(`🎓 ${n} aguarda a revisão do padrinho`); break;
+    case 'review_done': if (c) c.say(e.ok ? '🎉 aprovado!' : '✏️ ajustes', 4000, e.ok ? '#5fd38d' : '#ffcf5a'); feed(`${e.ok ? '🎉' : '✏️'} ${esc(e.text || '')}`); break;
     case 'bot_status': if (c) c.say(e.text === 'active' ? 'ativo!' : e.text === 'paused' ? 'pausa ☕' : e.text, 2000); break;
   }
 }

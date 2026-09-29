@@ -3,6 +3,7 @@ Modo LAN (EMANUSIA_LAN=1 / `emanusia serve --lan`): a equipe acessa pela rede; e
 cadastrados (login obrigatório). Sessão por cookie HttpOnly/SameSite=Strict; arquivos do
 workspace são servidos em sandbox."""
 import os
+import re
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -12,8 +13,8 @@ from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
-from . import auth, bots, config, events, learning, scheduler, vault
-from .engine import validate
+from . import auth, bots, config, events, learning, plain, scheduler, vault
+from .engine import code_hash, validate
 from .jobs import JobManager
 from .llm import OllamaClient
 from .tools import registry
@@ -101,7 +102,7 @@ def logout(request: Request, resp: Response):
 def me(request: Request):
     u = auth.user_from_token(request.cookies.get(COOKIE))
     return {"auth_enabled": auth.auth_enabled(),
-            "user": None if u is None else {"name": u.name, "role": u.role}}
+            "user": None if u is None else {"name": u.name, "role": u.role, "reviewer": u.is_reviewer}}
 
 
 @app.get("/api/config")
@@ -354,6 +355,7 @@ class NewUser(BaseModel):
     role: str = "operator"
     tools: list[str] | None = None
     workflows: list[str] | None = None
+    reviewer: bool = False
 
 
 @app.get("/api/users")
@@ -364,7 +366,7 @@ def users(u: auth.User = Depends(admin)):
 @app.post("/api/users")
 def user_add(b: NewUser, u: auth.User = Depends(admin)):
     try:
-        auth.add_user(b.name, b.password, b.role, b.tools, b.workflows)
+        auth.add_user(b.name, b.password, b.role, b.tools, b.workflows, b.reviewer)
     except ValueError as e:
         raise HTTPException(422, str(e))
     auth.audit(u.name, "user_add", name=b.name, role=b.role)
@@ -406,8 +408,10 @@ def validate_code(b: Code, u: auth.User = Depends(current_user)):
     try:
         wf = yaml.safe_load(b.yaml)
     except yaml.YAMLError as e:
-        return {"ok": False, "errors": [f"YAML inválido: {e}"], "warnings": [], "risky_tools": []}
-    return validate(wf, u)
+        return {"ok": False, "errors": [f"YAML inválido: {e}"], "warnings": [], "risky_tools": [],
+                "plain_errors": ["O texto do robô está mal formatado (YAML)."]}
+    rep = validate(wf, u)
+    return {**rep, "plain_errors": plain.explain_validation(rep, wf if isinstance(wf, dict) else None)}
 
 
 # ---------------- bots ----------------
@@ -418,13 +422,15 @@ class BotIn(BaseModel):
     description: str | None = None
     color: str | None = None
     yaml: str | None = None
+    code: dict | None = None  # passos editados na tela "simples" (sem YAML)
     origin: str = "manual"
 
 
 def _bot(bot_id: str, u: auth.User, edit: bool = False) -> bots.Bot:
     b = bots.get_bot(bot_id)
+    reviewing = u.is_reviewer and b is not None and b.review.get("status") == "pending"
     if b is None or (edit and not bots.can_edit(b, u)) or \
-            (not edit and not (u.is_admin or b.owner == u.name or b.status == "active")):
+            (not edit and not (u.is_admin or b.owner == u.name or b.status == "active" or reviewing)):
         raise HTTPException(404, "bot não encontrado")
     return b
 
@@ -434,6 +440,9 @@ def _bot_out(b: bots.Bot, u: auth.User) -> dict:
     d["yaml"] = yaml.safe_dump(b.code, allow_unicode=True, sort_keys=False) \
         if bots.can_edit(b, u) else None
     d["can_edit"] = bots.can_edit(b, u)
+    d["next"] = bots.next_step(b)
+    d["params"] = [{"name": k, "label": plain.param_label(k), "value": v} for k, v in (b.code.get("params") or {}).items()]
+    d["plain_errors"] = plain.explain_validation(b.validation, b.code) if b.validation else []
     if not d["can_edit"]:
         d["code"] = None
     return d
@@ -470,7 +479,8 @@ def bot_update(bot_id: str, b: BotIn, u: auth.User = Depends(runner)):
     _bot(bot_id, u, edit=True)
     try:
         bt = bots.update_bot(bot_id, u, team=b.team, role=b.role, description=b.description,
-                             color=b.color, name=b.name, code=_parse(b.yaml) if b.yaml else None)
+                             color=b.color, name=b.name, code=b.code if b.code is not None else
+                             (_parse(b.yaml) if b.yaml else None))
     except ValueError as e:
         raise HTTPException(422, str(e))
     return _bot_out(bt, u)
@@ -514,6 +524,114 @@ def bot_run(bot_id: str, b: BotRun, u: auth.User = Depends(runner)):
         return manager.submit_bot(bot_id, b.params, u, b.approve_risky).public()
     except PermissionError as e:
         raise HTTPException(403, str(e))
+
+
+# ---------------- modo simples: ensinar mostrando, ensaio, revisão ----------------
+class Teach(BaseModel):
+    name: str
+    url: str
+    team: str = "Geral"
+    description: str = ""
+    credential: str = ""
+
+
+@app.post("/api/teach")
+def teach(b: Teach, u: auth.User = Depends(runner)):
+    if not b.url.startswith(("http://", "https://", "file://")):
+        raise HTTPException(422, "informe o endereço do site começando com https://")
+    if bots.get_bot(bots.slug(b.name)):
+        raise HTTPException(422, f"já existe um bot chamado '{b.name}'")
+    if b.credential and not vault.exists(u.name, b.credential):
+        raise HTTPException(422, "cadastre esse acesso em 🔑 Acessos primeiro")
+    return manager.submit_teach(b.url, b.name, u, b.team, b.description, b.credential).public()
+
+
+@app.get("/api/bots/{bot_id}/steps")
+def bot_steps(bot_id: str, u: auth.User = Depends(current_user)):
+    b = _bot(bot_id, u)
+    if not (bots.can_edit(b, u) or u.is_reviewer):
+        raise HTTPException(404)
+    return {"steps": plain.describe_code(b.code), "next": bots.next_step(b), "status": b.status,
+            "needs_rehearsal": bots.needs_rehearsal(b.code), "rehearsal": b.rehearsal, "review": b.review,
+            # ensaio da versão atual do robô (deu certo OU falhou: a falha é o que mais importa mostrar)
+            "rehearsal_current": bool(b.rehearsal) and b.rehearsal.get("hash") == code_hash(b.code),
+            "params": [{"name": k, "label": plain.param_label(k), "value": v} for k, v in (b.code.get("params") or {}).items()],
+            "plain_errors": plain.explain_validation(b.validation, b.code) if b.validation else [],
+            "fields": {k: plain.field_label(k) for k in plain.FIELD}}
+
+
+class Rehearse(BaseModel):
+    params: dict = {}
+
+
+@app.post("/api/bots/{bot_id}/rehearse")
+def bot_rehearse(bot_id: str, b: Rehearse, u: auth.User = Depends(runner)):
+    bt = _bot(bot_id, u, edit=True)
+    if bt.status == "draft":
+        raise HTTPException(422, "confira o robô antes do ensaio: " + "; ".join(
+            plain.explain_validation(bt.validation, bt.code)[:3]))
+    return manager.submit_rehearsal(bot_id, u, b.params).public()
+
+
+class Fix(BaseModel):
+    path: str
+
+
+@app.post("/api/bots/{bot_id}/fix")
+def bot_fix(bot_id: str, b: Fix, u: auth.User = Depends(runner)):
+    _bot(bot_id, u, edit=True)
+    return manager.submit_fix(bot_id, b.path, u).public()
+
+
+@app.get("/api/bots/{bot_id}/shots/{name}")
+def bot_shot(bot_id: str, name: str, u: auth.User = Depends(current_user)):
+    from .rehearsal import shots_dir
+    b = _bot(bot_id, u)
+    if not (bots.can_edit(b, u) or u.is_reviewer) or not re.fullmatch(r"[\w]+\.jpg", name):
+        raise HTTPException(404)
+    p = shots_dir(b.id) / name
+    if not p.is_file():
+        raise HTTPException(404)
+    return FileResponse(p, media_type="image/jpeg")
+
+
+class ReviewReq(BaseModel):
+    note: str = ""
+
+
+@app.post("/api/bots/{bot_id}/review/submit")
+def review_submit(bot_id: str, b: ReviewReq, u: auth.User = Depends(runner)):
+    _bot(bot_id, u, edit=True)
+    try:
+        return _bot_out(bots.submit_review(bot_id, u, b.note), u)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+
+
+class ReviewDecision(BaseModel):
+    approve: bool
+    note: str = ""
+
+
+@app.post("/api/bots/{bot_id}/review")
+def review_decide(bot_id: str, b: ReviewDecision, u: auth.User = Depends(runner)):
+    _bot(bot_id, u)
+    if not b.approve and len(b.note.strip()) < 3:
+        raise HTTPException(422, "explique o que precisa ser ajustado")
+    try:
+        return _bot_out(bots.decide_review(bot_id, u, b.approve, b.note), u)
+    except PermissionError as e:
+        raise HTTPException(403, str(e))
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+
+
+@app.get("/api/reviews")
+def reviews(u: auth.User = Depends(current_user)):
+    if not u.is_reviewer:
+        return []
+    return [{**_bot_out(b, u), "steps": plain.describe_code(b.code)} for b in bots.pending_reviews()
+            if u.is_admin or b.owner != u.name]
 
 
 class Gen(BaseModel):

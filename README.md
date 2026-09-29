@@ -28,6 +28,24 @@ Manual: `pip install -e ".[all,dev]"`, `playwright install chromium`, `ollama pu
 | **💡 Aprendizado** | Toda tarefa do chat que dá certo vira experiência: tarefas parecidas ganham dicas e, quando a mesma rotina se repete 3×, o sistema sugere um bot pronto (valores que mudam viram parâmetros). Opcional: criar esses bots automaticamente como rascunho (nunca ativa sozinho). |
 | **Outros** | SAP GUI Scripting, RPA de desktop (pywinauto), visão por screenshot, APIs REST, SQL, Power BI, agendador, multiusuário com papéis e auditoria. |
 
+## Modo simples: qualquer pessoa ensina um robô
+1. **Ensinar mostrando** (aba Bots): dá um nome, diz o site e clica em *Começar a ensinar*. Uma janela
+   abre, a pessoa faz a tarefa normalmente e clica em *Terminei*. Cada clique vira um passo com o nome
+   que aparece na tela (“Clicar em *Buscar notas*”). Senhas não são gravadas: se escolher um acesso,
+   o robô usa o login cadastrado de quem rodar.
+2. **Passos em português**: a página do robô mostra o que ele faz como uma lista legível, com
+   editar/subir/descer/apagar por formulário. O código fica escondido em *Modo avançado*.
+3. **Ensaio**: o robô faz a tarefa de verdade e tira um print de cada passo. Se o site mudou, o passo
+   fica vermelho com a explicação (“Não encontrei *Buscar notas* na tela…”) e o botão
+   **👉 Mostrar onde fica**: o robô refaz os passos anteriores e o primeiro clique da pessoa ensina o
+   lugar novo. Robôs que mexem em telas (site, SAP, programas) só trabalham depois de um ensaio que deu certo.
+4. **Revisão do padrinho**: robô criado por quem não é padrinho/admin só começa a trabalhar depois que
+   um padrinho aprova (ou pede ajustes com um recado). Qualquer mudança depois exige nova revisão.
+   Marque o usuário como padrinho em Admin (ou `emanusia user add maria --reviewer`).
+5. **Linguagem comum** em tudo: erros (“Você ainda não cadastrou o seu acesso *erp*”), pedidos de
+   autorização (“O robô vai ENVIAR um e-mail para gerente@… com 1 anexo. Pode enviar?”) e
+   formulário com as informações que mudam a cada execução.
+
 ## Linguagem dos bots (YAML validado)
 ```yaml
 params: {url: "https://portal.fornecedor.com", destino: "financeiro@empresa.com"}

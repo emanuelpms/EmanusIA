@@ -8,9 +8,7 @@ import yaml
 from . import config
 from .tools.workflow import _path
 
-JS = r"""
-(() => {
-  if (window.__emanusiaRec) return; window.__emanusiaRec = true;
+SELECTOR_JS = r"""
   const q = s => s.replace(/"/g, '\\"');
   function sel(el) {
     if (el.id) return '#' + CSS.escape(el.id);
@@ -27,30 +25,45 @@ JS = r"""
     }
     return 'body > ' + parts.join(' > ');
   }
+  function label(el) {   // nome que a pessoa vê: texto do botão, rótulo do campo, placeholder...
+    const clean = s => (s || '').replace(/\s+/g, ' ').trim().slice(0, 40);
+    if (el.getAttribute('aria-label')) return clean(el.getAttribute('aria-label'));
+    if (['A', 'BUTTON'].includes(el.tagName) || el.getAttribute('role') === 'button') { const t = clean(el.innerText); if (t) return t; }
+    if (el.type === 'submit' || el.type === 'button') return clean(el.value);
+    if (el.id) { const l = document.querySelector('label[for="' + CSS.escape(el.id) + '"]'); if (l) return clean(l.innerText); }
+    const wrap = el.closest('label'); if (wrap) return clean(wrap.innerText);
+    return clean(el.placeholder || el.name || el.title || el.innerText || el.tagName.toLowerCase());
+  }
+"""
+
+JS = r"""
+(() => {
+  if (window.__emanusiaRec) return; window.__emanusiaRec = true;
+""" + SELECTOR_JS + r"""
   const send = e => window.__emanusia_rec(e);
   document.addEventListener('click', ev => {
     const el = ev.target.closest('a,button,input,select,label,[role=button]') || ev.target;
     if (el.tagName === 'INPUT' && !['checkbox', 'radio', 'submit', 'button'].includes(el.type)) return;
     if (el.tagName === 'SELECT') return;
-    send({kind: 'click', selector: sel(el)});
+    send({kind: 'click', selector: sel(el), label: label(el)});
   }, true);
   document.addEventListener('input', ev => {
     const el = ev.target;
     if (!['INPUT', 'TEXTAREA'].includes(el.tagName)) return;
     if (['checkbox', 'radio', 'submit', 'button'].includes(el.type)) return;
     send({kind: el.type === 'password' ? 'secret' : 'fill', selector: sel(el), value: el.value,
-          name: el.name || el.id || 'CAMPO'});
+          name: el.name || el.id || 'CAMPO', label: label(el)});
   }, true);
   document.addEventListener('change', ev => {
-    if (ev.target.tagName === 'SELECT') send({kind: 'select', selector: sel(ev.target), value: ev.target.value});
+    if (ev.target.tagName === 'SELECT') send({kind: 'select', selector: sel(ev.target), value: ev.target.value, label: label(ev.target)});
   }, true);
 })();
 """
 
 
 class Recorder:
-    def __init__(self, start_url: str):
-        self.start_url = start_url
+    def __init__(self, start_url: str, credential: str = "", username: str = ""):
+        self.start_url, self.credential, self.username = start_url, credential, username
         self.events: list[dict] = []
         self._lock = threading.Lock()
 
@@ -72,14 +85,24 @@ class Recorder:
         steps = [{"tool": "web_open", "args": {"url": self.start_url}}]
         for e in self.events:
             k = e["kind"]
+            lab = {"label": e["label"]} if e.get("label") else {}
             if k == "click":
-                steps.append({"tool": "web_click", "args": {"selector": e["selector"]}})
-            elif k in ("fill", "select"):
-                steps.append({"tool": "web_fill", "args": {"selector": e["selector"], "value": e["value"]}})
+                steps.append({"tool": "web_click", "args": {"selector": e["selector"]}, **lab})
+            elif k == "fill" and self.credential and self.username and e["value"] == self.username:
+                steps.append({"tool": "web_fill_credential", "args": {"selector": e["selector"],
+                              "credential": self.credential, "field": "username"}, **lab})
+            elif k == "fill":
+                steps.append({"tool": "web_fill", "args": {"selector": e["selector"], "value": e["value"]}, **lab})
+            elif k == "select":
+                steps.append({"tool": "web_select", "args": {"selector": e["selector"], "value": e["value"]}, **lab})
             elif k == "secret":
-                var = "SENHA_" + re.sub(r"\W", "_", e["name"]).upper()
-                steps.append({"tool": "web_fill_secret",
-                              "args": {"selector": e["selector"], "env_var": var}})
+                if self.credential:  # modo "ensinar": usa o acesso cadastrado de quem roda o bot
+                    steps.append({"tool": "web_fill_credential", "args": {"selector": e["selector"],
+                                  "credential": self.credential, "field": "password"}, **lab})
+                else:
+                    var = "SENHA_" + re.sub(r"\W", "_", e["name"]).upper()
+                    steps.append({"tool": "web_fill_secret",
+                                  "args": {"selector": e["selector"], "env_var": var}, **lab})
         return steps
 
     def save(self, name: str, description: str = "") -> dict:
@@ -89,10 +112,12 @@ class Recorder:
         return wf
 
 
-def record(url: str, name: str, stop: threading.Event) -> dict:
-    """Abre um navegador VISÍVEL; grava até `stop` ser acionado ou a janela ser fechada."""
+def record(url: str, name: str | None, stop: threading.Event, credential: str = "",
+           username: str = "") -> dict:
+    """Abre um navegador VISÍVEL; grava até `stop` ser acionado ou a janela ser fechada.
+    name=None: não salva workflow, só devolve os passos (modo "ensinar", que vira bot direto)."""
     from playwright.sync_api import sync_playwright
-    rec = Recorder(url)
+    rec = Recorder(url, credential, username)
     with sync_playwright() as pw:
         import os
         kw = {"headless": False}
@@ -110,4 +135,4 @@ def record(url: str, name: str, stop: threading.Event) -> dict:
                 break
         if browser.is_connected():
             browser.close()
-    return rec.save(name)
+    return rec.save(name) if name else {"params": {}, "steps": rec.steps()}

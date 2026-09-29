@@ -1,6 +1,9 @@
 """Bots: "funcionários" com identidade (nome, time, cargo) cujo código é um workflow validado.
 
-Ciclo de vida:  draft ──validar──► validated ──ativar──► active ⇄ paused
+Ciclo de vida:  draft ──validar──► validated ──(ensaio)──(revisão)──ativar──► active ⇄ paused
+- Ensaio: bots que mexem na tela (site, SAP, programas) precisam de um ensaio real que funcionou;
+  "validado" só garante que o código está bem escrito, o ensaio garante que funciona no sistema.
+- Revisão: bot criado por quem não é padrinho/admin só é ativado depois que um padrinho aprova.
 Qualquer edição do código volta o bot para draft (a validação fica presa ao hash do código),
 e a validação é refeita no momento de cada execução ("sempre validado pelo sistema")."""
 import re
@@ -35,6 +38,8 @@ class Bot:
     stats: dict = field(default_factory=lambda: {"runs": 0, "ok": 0, "errors": 0,
                                                  "last_run": None, "last_ok": None})
     origin: str = "manual"  # manual | ia | sugestao | gravacao
+    rehearsal: dict = field(default_factory=dict)   # {ok, hash, at, steps:[{path, text, ok, error, shot}]}
+    review: dict = field(default_factory=dict)      # {status: pending|approved|changes, hash, by, at, note}
     created: float = field(default_factory=time.time)
 
     def public(self) -> dict:
@@ -161,6 +166,56 @@ def validate_bot(bot_id: str, user: auth.User) -> dict:
     return rep
 
 
+SCREEN_GROUPS = {"web", "desktop", "sap", "vision", "access"}
+
+
+def needs_rehearsal(code: dict) -> bool:
+    from .tools import registry
+    groups = set()
+    for name in signature(code):
+        try:
+            groups.add(registry.get(name).group)
+        except KeyError:
+            pass
+    return bool(groups & SCREEN_GROUPS)
+
+
+def rehearsal_ok(b: Bot) -> bool:
+    return not needs_rehearsal(b.code) or (b.rehearsal.get("ok") and b.rehearsal.get("hash") == code_hash(b.code))
+
+
+def review_ok(b: Bot) -> bool:
+    owner = auth.get_user(b.owner)
+    if owner is None or owner.is_reviewer:
+        return True  # padrinho/admin (ou modo local) libera o próprio bot
+    return b.review.get("status") == "approved" and b.review.get("hash") == code_hash(b.code)
+
+
+def next_step(b: Bot) -> dict:
+    """O que falta para o bot trabalhar — mostrado como um único botão na tela."""
+    if b.status == "draft" or b.validation.get("hash") != code_hash(b.code):
+        return {"step": "validate", "text": "Conferir o robô"}
+    if not rehearsal_ok(b):
+        return {"step": "rehearse", "text": "Fazer o ensaio"}
+    if not review_ok(b):
+        if b.review.get("status") == "pending" and b.review.get("hash") == code_hash(b.code):
+            return {"step": "waiting_review", "text": "Aguardando a revisão do padrinho"}
+        return {"step": "submit_review", "text": "Enviar para revisão"}
+    if b.status != "active":
+        return {"step": "activate", "text": "Colocar para trabalhar"}
+    return {"step": "done", "text": "Trabalhando"}
+
+
+def _activation_block(b: Bot) -> str | None:
+    if b.status == "draft" or b.validation.get("hash") != code_hash(b.code):
+        return "valide o bot antes de ativar"
+    if not rehearsal_ok(b):
+        return "faça um ensaio com sucesso antes de ativar (o robô mexe em sistemas de verdade)"
+    if not review_ok(b):
+        return "o bot precisa ser aprovado por um padrinho/admin antes de ativar"
+    return None
+
+
 def set_active(bot_id: str, user: auth.User, active: bool) -> Bot:
     with _lock:
         b = get_bot(bot_id)
@@ -169,8 +224,9 @@ def set_active(bot_id: str, user: auth.User, active: bool) -> Bot:
         if not can_edit(b, user):
             raise PermissionError("sem permissão")
         if active:
-            if b.status == "draft" or b.validation.get("hash") != code_hash(b.code):
-                raise ValueError("valide o bot antes de ativar")
+            why = _activation_block(b)
+            if why:
+                raise ValueError(why)
             b.status = "active"
         elif b.status == "active":
             b.status = "paused"
@@ -178,6 +234,59 @@ def set_active(bot_id: str, user: auth.User, active: bool) -> Bot:
     auth.audit(user.name, "bot_active" if active else "bot_pause", bot=bot_id)
     events.emit("bot_status", bot=bot_id, text=b.status)
     return b
+
+
+def record_rehearsal(bot_id: str, rep: dict):
+    with _lock:
+        b = get_bot(bot_id)
+        if b is None:
+            return
+        b.rehearsal = rep
+        _write(b)
+
+
+def submit_review(bot_id: str, user: auth.User, note: str = "") -> Bot:
+    with _lock:
+        b = get_bot(bot_id)
+        if b is None:
+            raise KeyError(bot_id)
+        if not can_edit(b, user):
+            raise PermissionError("sem permissão")
+        if b.status == "draft" or not rehearsal_ok(b):
+            raise ValueError("confira o robô e faça o ensaio antes de enviar para revisão")
+        b.review = {"status": "pending", "hash": code_hash(b.code), "by": None, "at": time.strftime("%Y-%m-%d %H:%M"),
+                    "requested_by": user.name, "note": note[:500]}
+        _write(b)
+    auth.audit(user.name, "review_request", bot=bot_id)
+    events.emit("review_requested", bot=bot_id, text=f"{b.name} aguarda revisão")
+    return b
+
+
+def decide_review(bot_id: str, reviewer: auth.User, approve: bool, note: str = "") -> Bot:
+    if not reviewer.is_reviewer:
+        raise PermissionError("apenas padrinhos/admins revisam bots")
+    with _lock:
+        b = get_bot(bot_id)
+        if b is None:
+            raise KeyError(bot_id)
+        if b.owner == reviewer.name and not reviewer.is_admin:
+            raise PermissionError("peça a outro padrinho para revisar o seu bot")
+        if b.review.get("status") != "pending" or b.review.get("hash") != code_hash(b.code):
+            raise ValueError("este bot não está aguardando revisão (ou mudou depois do pedido)")
+        b.review.update(status="approved" if approve else "changes", by=reviewer.name,
+                        at=time.strftime("%Y-%m-%d %H:%M"), note=note[:500])
+        if approve and not _activation_block(b):
+            b.status = "active"
+        _write(b)
+    auth.audit(reviewer.name, "review", bot=bot_id, approved=approve, note=note)
+    events.emit("review_done", bot=bot_id, ok=approve,
+                text=f"{b.name} {'aprovado e trabalhando' if approve else 'precisa de ajustes'}")
+    return b
+
+
+def pending_reviews() -> list[Bot]:
+    return [b for b in list_bots() if b.review.get("status") == "pending"
+            and b.review.get("hash") == code_hash(b.code)]
 
 
 def ensure_runnable(b: Bot, user: auth.User, require_active: bool = False):

@@ -23,9 +23,12 @@ class User:
     role: str = "operator"
     tools: list[str] | None = None       # whitelist de ferramentas (None = todas)
     workflows: list[str] | None = None   # whitelist de workflows (None = todos)
+    reviewer: bool = False               # "padrinho": revisa e libera bots criados por outras pessoas
 
     @property
     def is_admin(self): return self.role == "admin"
+    @property
+    def is_reviewer(self): return self.role == "admin" or (self.reviewer and self.role == "operator")
     @property
     def can_run(self): return self.role in ("admin", "operator")   # viewer só consulta
     @property
@@ -60,7 +63,8 @@ def auth_enabled() -> bool:
     return bool(_load())
 
 
-def add_user(name: str, password: str, role: str = "operator", tools=None, workflows=None):
+def add_user(name: str, password: str, role: str = "operator", tools=None, workflows=None,
+             reviewer: bool = False):
     if role not in ROLES:
         raise ValueError(f"role deve ser um de {ROLES}")
     if len(password) < 8:
@@ -68,7 +72,7 @@ def add_user(name: str, password: str, role: str = "operator", tools=None, workf
     users = _load()
     salt = secrets.token_bytes(16)
     users[name] = {"role": role, "salt": salt.hex(), "hash": _hash(password, salt),
-                   "tools": tools, "workflows": workflows}
+                   "tools": tools, "workflows": workflows, "reviewer": bool(reviewer)}
     _file().write_text(yaml.safe_dump(users, allow_unicode=True), encoding="utf-8")
 
 
@@ -83,12 +87,13 @@ def remove_user(name: str):
 
 
 def list_users() -> list[dict]:
-    return [{"name": n, "role": u["role"], "tools": u.get("tools"), "workflows": u.get("workflows")}
+    return [{"name": n, "role": u["role"], "tools": u.get("tools"), "workflows": u.get("workflows"),
+             "reviewer": bool(u.get("reviewer"))}
             for n, u in _load().items()]
 
 
 def _user(name: str, u: dict) -> User:
-    return User(name, u["role"], u.get("tools"), u.get("workflows"))
+    return User(name, u["role"], u.get("tools"), u.get("workflows"), bool(u.get("reviewer")))
 
 
 def verify(name: str, password: str) -> User | None:
