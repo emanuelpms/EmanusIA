@@ -26,7 +26,7 @@ if CHROMIUM:
     os.environ["EMANUSIA_CHROMIUM"] = CHROMIUM
 sys.path.insert(0, str(ROOT))
 
-from emanusia import auth, bots, config, learning, vault  # noqa: E402
+from emanusia import auth, bots, config, vault  # noqa: E402
 from emanusia.tools import load_all, registry  # noqa: E402
 
 PORTAL = """<!doctype html><meta charset=utf-8><title>Portal do Fornecedor</title>
@@ -79,12 +79,15 @@ def seed():
                          extra={"client": "300", "language": "PT"})
     vault.set_credential(vault.SHARED, "banco-extrato", "empresa.fin", "x", label="Internet banking (conta de serviço)",
                          url="https://banco.com.br")
-    for i, url in enumerate(["https://portal.acme.com.br/pedidos?d=01", "https://portal.acme.com.br/pedidos?d=02",
-                             "https://portal.acme.com.br/pedidos?d=03"]):
-        learning.record_task("local", f"baixar os pedidos do portal acme do dia {i + 1} e salvar em planilha", [
-            {"name": "web_open", "args": {"url": url}, "ok": True},
-            {"name": "web_table", "args": {"selector": "table.pedidos"}, "ok": True},
-            {"name": "excel_write", "args": {"path": "pedidos.xlsx", "sheets": {"Pedidos": [[1]]}}, "ok": True}], True)
+    # documentos de exemplo para o construtor: boletos em PDF e notas fiscais em XML
+    sys.path.insert(0, str(ROOT / "tests"))
+    from test_builder import NFE, make_pdf
+    for nome, valor, venc, linha in (("energia", "R$ 1.320,45", "12/10/2026", "23790.12345 60000.123456 78901.234567 1 98760000132045"),
+                                     ("agua", "R$ 289,90", "15/10/2026", "23790.11111 60000.222222 78901.333333 2 98760000028990"),
+                                     ("internet", "R$ 449,00", "20/10/2026", "23790.44444 60000.555555 78901.666666 3 98760000044900")):
+        make_pdf(f"boletos/{nome}.pdf", [[f"Conta de {nome}", f"Vencimento: {venc}", f"Total a pagar {valor}", linha]])
+    for n, total in ((1, "1250.00"), (2, "980.40"), (3, "4310.75")):
+        config.safe_path(f"notas/nfe{n}.xml").write_text(NFE.format(n=n, total=total), encoding="utf-8")
     random.seed(7)
     rows = [["Data", "Região", "Vendedor", "Produto", "Valor", "Qtd"]]
     for _ in range(900):
@@ -193,9 +196,27 @@ def main():
             pg.evaluate("closeModal(); go('creds')")
             pg.wait_for_timeout(700)
             shot(pg, "acessos.png")
-            pg.evaluate("go('learn')")
-            pg.wait_for_timeout(800)
-            shot(pg, "aprendizado.png")
+            # ---------- construtor sem código
+            bd = ctx.new_page()
+            bd.on("dialog", lambda d: d.accept())
+            bd.goto(BASE + "/builder")
+            bd.wait_for_selector(".tpl")
+            bd.wait_for_timeout(500)
+            shot(bd, "construtor-modelos.png")
+            bd.click("text=Boletos em PDF")
+            bd.fill("#bn", "Boletos do mês")
+            bd.fill("#bt", "Financeiro")
+            bd.wait_for_timeout(800)
+            bd.locator(".kids .step .hd").nth(1).click()
+            bd.wait_for_timeout(700)
+            shot(bd, "construtor.png")
+            bd.click("#testb")
+            bd.wait_for_selector(".banner.ok, .banner.bad", timeout=60000)
+            bd.wait_for_timeout(1200)
+            bd.locator(".step .hd").last.click()
+            bd.wait_for_timeout(600)
+            shot(bd, "construtor-teste.png")
+            bd.close()
             # autorização em linguagem comum
             pg.evaluate("go('bots')")
             pg.wait_for_timeout(600)

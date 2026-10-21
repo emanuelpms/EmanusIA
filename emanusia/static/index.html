@@ -15,7 +15,7 @@ main{flex:1;overflow:auto;padding:24px 28px}main.full{padding:0;overflow:hidden}
 .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:12px}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
 button.b,a.b{all:unset;cursor:pointer;background:var(--acc);color:#fff;padding:7px 14px;border-radius:9px;font-size:14px;display:inline-block}
-button.b.sec{background:var(--line);color:var(--fg)}button.b.bad{background:var(--bad)}button.b:disabled{opacity:.5;cursor:default}
+button.b.sec,a.b.sec{background:var(--line);color:var(--fg)}button.b.bad{background:var(--bad)}button.b:disabled{opacity:.5;cursor:default}
 input,select,textarea{background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:9px;padding:8px 10px;font:inherit;width:100%}
 textarea{font-family:ui-monospace,Consolas,monospace;font-size:13px}label{display:block;margin:10px 0 4px;color:var(--mut);font-size:13px}
 .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.mut{color:var(--mut)}.small{font-size:13px}
@@ -258,7 +258,11 @@ async function viewBots() {
   ${revs.length ? `<div class="card" style="border-color:var(--warn)"><b>🎓 Aguardando sua revisão (${revs.length})</b>
     ${revs.map(r => `<div class="row" style="margin-top:8px"><span style="flex:1"><b>${esc(r.name)}</b> <span class="mut small">de ${esc(r.owner)} · ${r.steps.length} passos${r.review.note ? ' · “' + esc(r.review.note) + '”' : ''}</span></span>
     <button class="b" onclick='openBot(${JSON.stringify(r.id)})'>Revisar</button></div>`).join('')}</div>` : ''}
-  ${readonly() ? '' : `<div class="hero"><h3>🎬 Ensinar um robô novo</h3><div class="mut">Você faz a tarefa uma vez, o robô observa e aprende. Não precisa saber programar.</div>
+  ${readonly() ? '' : `<div class="hero"><h3>🧩 Montar um robô peça por peça</h3><div class="mut">Escolha as ações prontas — ler PDF, XML de nota, e-mails e planilhas, montar Excel e painéis,
+   mexer em sites, pastas e SAP — e encaixe uma depois da outra, com repetições e decisões. Teste na hora e veja o resultado de cada passo.</div>
+   <div class="row" style="margin-top:10px"><button class="b big" onclick="location.href='/builder'">🧩 Abrir o construtor</button>
+   <span class="mut small">Comece do zero ou por um modelo pronto (notas fiscais, boletos, planilhas, painéis, sites).</span></div></div>
+  <div class="hero"><h3>🎬 Ensinar mostrando (sites)</h3><div class="mut">Você faz a tarefa no site uma vez, o robô observa e aprende. Depois dá para completar no construtor.</div>
    <div class="how"><div><b>1</b>Dê um nome e diga em qual site ele trabalha</div><div><b>2</b>Uma janela abre: faça a tarefa normalmente</div>
    <div><b>3</b>Clique em <i>Terminei</i>. O robô mostra os passos que aprendeu</div><div><b>4</b>Faça um ensaio e peça a revisão do padrinho</div></div>
    <div class="row"><input id="tn" placeholder="Nome do robô (ex.: Baixar notas do fornecedor)" style="flex:2">
@@ -273,10 +277,7 @@ async function viewBots() {
    <select id="br" style="flex:0 0 130px"><option value="worker">Funcionário</option><option value="boss">Chefe</option></select></div>
    <div class="row" style="margin-top:6px"><button class="b sec" onclick="newBot()">Escrever o código</button>
    <select id="bw" style="flex:0 1 240px"><option value="">…ou partir de uma automação</option>${wfs.map(w => `<option>${esc(w.name)}</option>`).join('')}</select></div></details></div>
-  <div class="hero"><h3>🧩 Montar um robô peça por peça</h3><div class="mut">Escolha as ações prontas — ler PDF, XML de nota, e-mails e planilhas, montar Excel e painéis,
-   mexer em sites, pastas e SAP — e encaixe uma depois da outra, com repetições e decisões. Teste na hora e veja o resultado de cada passo.</div>
-   <div class="row" style="margin-top:10px"><button class="b big" onclick="location.href='/builder'">🧩 Abrir o construtor</button>
-   <span class="mut small">Também dá para editar no construtor qualquer robô já ensinado.</span></div></div>`}
+</div>`}
   <div class="grid">${bs.map(b => { const [st, cls] = STATUS[b.status] || [b.status, ''], nx = b.next || {};
     const canRun = !readonly() && b.status !== 'draft' && (b.status === 'active' || b.can_edit);
     return `<div class="card"><div class="row"><span style="width:12px;height:12px;border-radius:3px;background:${esc(b.color)};display:inline-block"></span>
