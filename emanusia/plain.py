@@ -100,6 +100,7 @@ TOOL_TEXT = {
     "data_combine": lambda a, s: "Juntar várias planilhas em uma",
     "data_extract": lambda a, s: f"Tirar as tabelas do arquivo {_file(a.get('path', ''))}",
     "data_compute": lambda a, s: "Calcular novas colunas",
+    "data_insights": lambda a, s: f"Analisar {a.get('value', 'os dados')} e escrever o que encontrou e as sugestões",
     "powerbi_export": lambda a, s: "Preparar os dados para o Power BI",
     "email_send": lambda a, s: f"Enviar e-mail para {a.get('to')} — “{_short(a.get('subject', ''), 40)}”",
     "email_read": lambda a, s: "Ler os e-mails da caixa de entrada",
@@ -121,7 +122,7 @@ TOOL_TEXT = {
     "sap_read_grid": lambda a, s: "Copiar o relatório do SAP",
     "desktop_start_app": lambda a, s: f"Abrir o programa {_file(a.get('command', ''))}",
     "desktop_click": lambda a, s: f"Clicar em “{a.get('control')}” no programa",
-    "desktop_type": lambda a, s: f"Digitar no programa “{_short(a.get('text', ''), 30)}”",
+    "desktop_type": lambda a, s: f"Digitar “{_short(a.get('text', ''), 30)}” no programa" + (f" em “{a['control']}”" if a.get("control") else ""),
     "file_write": lambda a, s: f"{'Acrescentar no' if a.get('append') else 'Salvar o'} arquivo {_file(a.get('path', ''))}",
     "file_read": lambda a, s: f"Ler o arquivo {_file(a.get('path', ''))}",
     "file_list": lambda a, s: f"Listar os arquivos da pasta {a.get('subdir') or 'de trabalho'}" + (f" ({a['pattern']})" if a.get("pattern") not in (None, "", "*") else ""),
@@ -151,13 +152,13 @@ TOOL_TEXT = {
 
 ICON = {"web": "🌐", "excel": "📗", "dashboard": "📊", "data": "🧮", "mail": "✉️", "sap": "🟦",
         "desktop": "🖥", "access": "🔑", "powerbi": "📈", "files": "📁", "connectors": "🔌", "pdf": "📕",
-        "xmldata": "🧾", "botops": "🤝", "workflow": "⚙️"}
+        "xmldata": "🧾", "insights": "🧠", "botops": "🤝", "workflow": "⚙️"}
 
 
 def _friendly(text: str) -> str:
     """{{filial}} -> «Filial» (a informação que muda a cada vez)."""
     rx = r"\{\{\s*([\w.]+)\s*\}\}"
-    lab = lambda m: "«" + param_label(m.group(1).split(".")[0]) + "»"
+    lab = lambda m: "«" + " › ".join([param_label(m.group(1).split(".")[0])] + m.group(1).split(".")[1:]) + "»"
     text = re.sub("“" + rx + "”", lab, text)  # “{{filial}}” -> «Filial» (sem aspas duplicadas)
     return re.sub(rx, lab, text)
 
@@ -407,6 +408,9 @@ def preview(v, rows: int = 6, cols: int = 8) -> dict:
                 "table": [head] + [[cut(r.get(h, ""), 40) for h in head] for r in v[:rows]]}
     if isinstance(v, list):
         return {"text": f"Lista com {len(v)} item(ns)" + (": " + ", ".join(cut(x, 40) for x in v[:5]) if v else "")}
+    if isinstance(v, dict) and isinstance(v.get("findings"), list):
+        return {"text": f"{len(v['findings'])} ponto(s) identificado(s), {len(v.get('suggestions') or [])} sugestão(ões): "
+                        + cut((v["findings"] or [""])[0], 120)}
     if isinstance(v, dict):
         saved = v.get("output") or v.get("path")
         if isinstance(saved, str) and saved:

@@ -23,7 +23,11 @@ AGGS = {"sum": "sum", "soma": "sum", "mean": "mean", "media": "mean", "média": 
 def load(source, sheet: str | None = None) -> pd.DataFrame:
     if isinstance(source, pd.DataFrame):
         return source.copy()
-    if isinstance(source, dict) and isinstance(source.get("rows"), list):  # resultado de outro passo
+    if isinstance(source, dict) and getattr(source, "df", None) is not None:  # resultado completo de outro passo
+        return source.df.copy()
+    if isinstance(source, dict) and isinstance(source.get("rows"), list):
+        if source.get("saved") and source.get("total_rows", 0) > len(source["rows"]) - 1:
+            return load(source["saved"])  # amostra cortada: relê o arquivo salvo
         source = source["rows"]
     if isinstance(source, list):
         if not source:
@@ -73,9 +77,16 @@ def save(df: pd.DataFrame, output: str | None, sheet: str = "Dados"):
     return output
 
 
+class Table(dict):
+    """Resultado de um passo de dados: mostra até `limit` linhas, mas guarda a tabela INTEIRA em `.df`
+    para o próximo passo (dashboard, planilha, análise) não trabalhar só com a amostra."""
+    df: pd.DataFrame | None = None
+
+
 def result(df: pd.DataFrame, output: str | None, limit: int = MAX_RETURN, **extra) -> dict:
-    return {"total_rows": len(df), "rows": rows(df, min(limit, MAX_RETURN)), "saved": save(df, output),
-            **extra}
+    t = Table({"total_rows": len(df), "rows": rows(df, min(limit, MAX_RETURN)), "saved": save(df, output), **extra})
+    t.df = df.reset_index(drop=True)
+    return t
 
 
 def _col(df, name):

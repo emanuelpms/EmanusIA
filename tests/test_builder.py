@@ -353,3 +353,95 @@ def test_builder_ui_build_save_and_test(headless):
     assert bt.origin == "construtor" and bt.rehearsal["ok"]
     assert bt.code["steps"][1] == {"tool": "excel_save", "args": {"path": "relatorio.xlsx", "data": "{{notas}}", "sheet": "Dados",
                                                                   "as_table": True}}
+
+
+# ---------------------------------------------------------------- analista + processo completo
+def _base_vendas(n_extra_dup=2):
+    import random
+    random.seed(3)
+    rows = [["data", "regiao", "vendedor", "valor"]]
+    for m, peso in ((8, 1.0), (9, 1.1), (10, 0.7)):  # outubro cai
+        for i in range(40):
+            reg = random.choice(["Sul", "Sudeste", "Sudeste", "Sudeste", "Norte", "Nordeste", "Centro-Oeste"])
+            if m == 10 and reg == "Sudeste":
+                peso_r = 0.5
+            else:
+                peso_r = 1
+            v = round(random.uniform(200, 900) * peso * peso_r, 2)
+            rows.append([f"{random.randint(1, 28):02d}/{m:02d}/2026", reg, random.choice(["Ana", "Rui", "Lia"]),
+                         f"R$ {v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")])
+    rows.append(["15/10/2026", "Sul", "Ana", "R$ 48.000,00"])  # fora do padrão
+    rows += [rows[1]] * n_extra_dup
+    return rows
+
+
+def test_data_insights_writes_findings_and_suggestions():
+    registry.call("excel_write", {"path": "vendas.xlsx", "sheets": {"Base": _base_vendas()}})
+    dados = registry.call("data_clean", {"source": "vendas.xlsx", "dtypes": {"valor": "number", "data": "date"}})
+    assert dados["total_rows"] == 121 and len(dados["rows"]) == 21  # na tela, amostra...
+    r = registry.call("data_insights", {"source": dados, "value": "valor", "date_column": "data",
+                                        "dimensions": ["regiao"], "goal": 100000, "title": "Vendas"})
+    txt = r["text"]
+    assert r["summary"]["registros"] == 121  # ...mas a análise usa a base inteira
+    assert "out/2026" in txt and "em relação a set/2026" in txt
+    assert "Sem os valores fora do padrão, a variação de out/2026 seria -" in txt and "Investigar a queda" in txt
+    assert "Maior queda por regiao no último mês: Sudeste" in txt
+    assert "muito acima do normal" in txt and "R$ 48.000,00" in txt
+    assert "Meta de R$ 100.000,00" in txt
+    assert r["html"].startswith("<h3") and "<li>" in r["html"] and "Sugestões de ação" in r["html"]
+    vazio = registry.call("data_insights", {"source": [["valor"]], "value": "valor"})
+    assert "vazia" in vazio["text"]
+
+
+def test_full_process_template_web_excel_dashboard_desktop_emails(headless, monkeypatch):
+    import functools
+    import http.server
+    import threading
+
+    from emanusia import vault
+    from emanusia.tools import mail
+    ws = config.workspace()
+    registry.call("excel_write", {"path": "site/base.xlsx", "sheets": {"Base": _base_vendas()}})
+    (ws / "site/index.html").write_text("""<meta charset=utf-8><form onsubmit="event.preventDefault();document.getElementById('app').hidden=false;this.hidden=true">
+      <input type=text name=u><input type=password name=p><button>Entrar</button></form>
+      <div id=app hidden><button onclick="document.getElementById('dl').hidden=false">Relatórios</button>
+      <a id=dl hidden href="base.xlsx" download>Exportar Excel</a></div>""", encoding="utf-8")
+    handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(ws / "site"))
+    handler.log_message = lambda *a: None
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    vault.set_credential("local", "sistema-web", "robo", "segredo", url="")
+    typed, sent = [], []
+    for name in ("desktop_start_app", "desktop_type", "desktop_click"):  # "outro programa do PC" (Windows)
+        monkeypatch.setattr(registry.get(name), "fn", lambda _n=name, **a: typed.append((_n, a)) or "ok")
+    monkeypatch.setattr(mail, "outlook_send", lambda to, subj, body, att, cc, html: sent.append((to, subj, body, att, html)))
+    t = next(x for x in catalog.TEMPLATES if x["id"] == "processo_completo")
+    try:
+        run_steps({**t["code"], "name": ""}, {"site": f"http://127.0.0.1:{srv.server_address[1]}/index.html"},
+                  confirm=lambda n, a: True)
+    finally:
+        srv.shutdown()
+        registry.call("web_close")
+    for f in ("downloads/base.xlsx", "saida/dados-tratados.xlsx", "saida/dashboard.xlsx", "saida/painel.html",
+              "saida/relatorio-lancamentos.xlsx"):
+        assert (ws / f).exists(), f
+    from openpyxl import load_workbook
+    assert load_workbook(ws / "saida/dados-tratados.xlsx").active.max_row == 122  # base inteira tratada
+    regioes = [a["text"] for n, a in typed if n == "desktop_type" and a["control"] == "Região"]
+    assert sorted(regioes) == ["Centro-Oeste", "Nordeste", "Norte", "Sudeste", "Sul"]
+    assert [s[0] for s in sent] == ["ti@empresa.com", "gestores@empresa.com"]
+    assert "5 lançamento(s)" in sent[0][2]
+    to, subj, body, att, html_on = sent[1]
+    assert html_on and "O que foi identificado" in body and "Sugestões de ação" in body and len(att) == 5
+
+
+def test_full_process_failure_warns_responsible(monkeypatch):
+    from emanusia.tools import mail
+    sent = []
+    monkeypatch.setattr(mail, "outlook_send", lambda to, subj, body, att, cc, html: sent.append((to, subj, body)))
+    t = next(x for x in catalog.TEMPLATES if x["id"] == "processo_completo")
+    code = {**t["code"], "name": ""}
+    code["steps"] = [{**code["steps"][0], "try": [{"tool": "data_clean", "args": {"source": "nao-existe.xlsx"}}]}]
+    with pytest.raises(Exception):
+        run_steps(code, confirm=lambda n, a: True)
+    assert sent and sent[0][1].startswith("⚠️") and "nao-existe" in sent[0][2]

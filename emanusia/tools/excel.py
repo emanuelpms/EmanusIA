@@ -276,7 +276,13 @@ def excel_dashboard(path: str, source, title: str, sheet: str | None = None, sub
        "append_rows": {"type": "array"}, "new_sheet": {"type": "string"}, "rows": {"type": "array"}},
       ("path",))
 def excel_update(path: str, sheet: str | None = None, cells: dict | None = None,
-                 append_rows: list | None = None, new_sheet: str = "", rows: list | None = None):
+                 append_rows=None, new_sheet: str = "", rows=None):
+    from .data import load, rows as to_rows
+    as_table = lambda v: v if isinstance(v, list) and (not v or isinstance(v[0], list | tuple)) else to_rows(load(v), None)  # noqa: E731
+    if append_rows and not (isinstance(append_rows, list) and isinstance(append_rows[0], list | tuple)):
+        append_rows = as_table(append_rows)[1:]  # dados de outro passo: entram só as linhas, sem cabeçalho
+    if rows:
+        rows = as_table(rows)
     p = config.safe_path(path)
     wb = load_workbook(p, keep_vba=p.suffix.lower() == ".xlsm")
     if new_sheet:

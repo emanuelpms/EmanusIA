@@ -6,7 +6,7 @@ ler e montar planilhas Excel, criar dashboards, organizar pastas, operar sites, 
 programas — com decisões ("se o valor for maior que…") e repetições ("para cada arquivo da pasta").
 Tudo aparece num **escritório em pixel art** que cresce conforme a empresa contrata mais bots.
 
-![sem IA](https://img.shields.io/badge/sem%20IA-leve%20e%20r%C3%A1pido-blue) ![testes](https://img.shields.io/badge/testes-104%20passando-green) ![plataforma](https://img.shields.io/badge/Windows-10%2F11-0078d6)
+![sem IA](https://img.shields.io/badge/sem%20IA-leve%20e%20r%C3%A1pido-blue) ![testes](https://img.shields.io/badge/testes-107%20passando-green) ![plataforma](https://img.shields.io/badge/Windows-10%2F11-0078d6)
 
 <p align="center"><img src="docs/images/construtor-teste.png" alt="Construtor de robôs: passos montados com o resultado do teste em cada um" width="900"></p>
 <p align="center"><i>O construtor: as peças ficam à esquerda, o robô no meio e o formulário do passo à direita. Depois do ▶ Testar, cada passo mostra ✓, o tempo e o que produziu.</i></p>
@@ -34,7 +34,7 @@ Manual: `pip install -e ".[all,dev]"` e `playwright install chromium`.
 
 ## 🧩 Construtor de robôs (sem código)
 Em **Bots → 🧩 Abrir o construtor**:
-1. Escolha um **modelo pronto** ou comece do zero.
+1. Escolha um **modelo pronto** ou comece do zero. O modelo *Processo completo* faz site → Excel baixado → dados tratados → dashboard (Excel + painel) → lançamento em outro programa → relatório → e-mail de “terminei” para uns e e-mail com anexos e análise para outros (e avisa se der erro).
 2. Clique nas **peças** à esquerda (busca por "pdf", "nota", "e-mail", "planilha"...). Elas entram
    uma depois da outra; dentro de *Se…* e *Para cada…* há o botão “+ adicionar aqui”.
 3. Preencha o **formulário** de cada passo. Dê nome ao resultado (ex.: `notas`) e use-o depois com {x}.
@@ -48,6 +48,7 @@ Em **Bots → 🧩 Abrir o construtor**:
 | **✉️ E-mail** | Ler a caixa do Outlook com filtros (assunto, remetente, últimos dias, só com anexo PDF/XML) salvando os anexos numa pasta; enviar com anexos. SMTP/IMAP configurável. |
 | **📗 Excel** | Montar planilha formatada (R$, datas, total, tabela, gráfico) ou acrescentar linhas numa existente; ler; atualizar células; dashboard nativo do Excel com fórmulas vivas; atualizar Power Query/macro. |
 | **🧮 Dados** | Filtrar, agrupar e somar; tabela dinâmica; PROCV/conciliação; limpar (duplicados, R$ 1.234,56 → número, datas); consolidar várias planilhas; colunas calculadas. |
+| **🧠 Análise de analista** | Lê a base e escreve, em português, o que foi identificado (variação do mês, melhores e piores, concentração, valores fora do padrão e a variação sem eles, dados faltando, meta) e as sugestões de ação — pronto para o corpo do e-mail (`{{analise.html}}`). Por regras, sem IA. |
 | **📊 Painéis** | Painel HTML interativo: indicadores, gráficos, filtros por coluna e período, tabela ordenável, exportação. |
 | **🌐 Sites** | Abrir, entrar com o acesso de quem roda, clicar, preencher, escolher, esperar, copiar tabelas e listas, baixar e enviar arquivos, quadros internos, abas. Ou **ensinar mostrando**. |
 | **📁 Pastas** | Para cada arquivo da pasta; listar, copiar, mover, renomear, apagar, compactar/descompactar, ler/gravar texto e JSON — só nas **pastas liberadas** pelo admin. |

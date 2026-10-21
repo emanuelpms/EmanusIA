@@ -332,7 +332,7 @@ function emptyState() {
       h('span', {class: 'i'}, t.icon), h('b', {}, t.title), h('span', {class: 'small mut'}, t.desc)))));
 }
 function useTemplate(t) {
-  snap(); CODE = clone(t.code); if (!$('#bn').value.trim()) $('#bn').value = t.title.split('→')[0].trim();
+  snap(); CODE = clone(t.code); if (!$('#bn').value.trim()) $('#bn').value = t.title.split(/[→:]/)[0].trim();
   SEL = null; changed(true);
 }
 

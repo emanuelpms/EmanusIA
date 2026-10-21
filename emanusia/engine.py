@@ -187,8 +187,18 @@ def _regex_find(text, pattern, group=0):
     return (m.group(int(group)) if m else "")
 
 
+def _full(table):
+    """Tabela completa de um resultado de dados (que na tela mostra só uma amostra)."""
+    df = getattr(table, "df", None)
+    if df is not None:
+        from .tools.data import rows
+        return rows(df, None)
+    return table
+
+
 def _column(table, name):
     """Valores de uma coluna de uma tabela ([[cabeçalho], [linha]...] ou [{coluna: valor}])."""
+    table = _full(table)
     if isinstance(table, dict) and "rows" in table:
         table = table["rows"]
     if not table:
@@ -201,6 +211,7 @@ def _column(table, name):
 
 def _records(table):
     """Tabela -> lista de {coluna: valor} (para repetir linha a linha usando os nomes das colunas)."""
+    table = _full(table)
     if isinstance(table, dict) and "rows" in table:
         table = table["rows"]
     if not table or isinstance(table[0], dict):

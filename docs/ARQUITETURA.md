@@ -84,7 +84,7 @@ flowchart LR
 | E-mail | **Outlook** (COM/pywin32) ou **SMTP/IMAP** | Ler com filtros, baixar anexos, enviar |
 | Segurança | **cryptography** (Fernet/AES) + **DPAPI** do Windows, PBKDF2 | Cofre de senhas, login dos usuários |
 | Armazenamento | Arquivos **YAML/JSON** em `data/` | Simples de copiar/backup; sem banco de dados para instalar |
-| Testes | **pytest** (104 testes, incluindo navegador real) | Garantir que nada quebra |
+| Testes | **pytest** (107 testes, incluindo navegador real) | Garantir que nada quebra |
 
 ## 3. Como as peças funcionam
 
@@ -110,7 +110,7 @@ ver o YAML: ela monta no **construtor** e vê os passos em português (`plain.py
   a explicação ("falta informar nome do arquivo").
 - **▶ Testar**: o robô trabalha de verdade (é o ensaio do ciclo de vida) e cada passo mostra ✓/✖, o
   tempo e uma prévia do resultado (tabela, lista, texto, arquivo salvo), além do print quando há tela.
-- **Modelos prontos**: notas fiscais XML → planilha → e-mail; anexos do e-mail → notas → pasta de
+- **Modelos prontos**: processo completo (site → Excel → dashboard → outro programa → relatório → e-mails com análise, com aviso se der erro); notas fiscais XML → planilha → e-mail; anexos do e-mail → notas → pasta de
   processados; boletos em PDF → planilha de vencimentos; vendas → painel + dashboard do Excel;
   consolidar planilhas de filiais; entrar no site, baixar relatório e enviar.
 
@@ -122,6 +122,7 @@ ver o YAML: ela monta no **construtor** e vê os passos em português (`plain.py
 | E-mail | ler com filtros (assunto, remetente, últimos N dias, só com anexo pdf/xml…) salvando os anexos numa pasta; enviar com anexos por padrão (`saida/*.pdf`) |
 | Excel | montar planilha a partir de dados (formatos, total, tabela, gráfico, acrescentar no fim); ler; atualizar células/linhas; dashboard nativo; atualizar consultas/macro |
 | Pastas | listar, copiar, mover, renomear, apagar (pede autorização), criar pasta, compactar/descompactar (protegido contra "zip malicioso"), ler/gravar texto e JSON |
+| Análise | `data_insights`: totais, variação do último mês (e sem os valores fora do padrão), melhores/piores por dimensão, concentração (Pareto), registros fora do padrão, dados faltando/duplicados, meta; devolve `findings`, `suggestions`, `text` e `html` para o e-mail — tudo por regras transparentes |
 | Cálculos | `to_number("R$ 1.234,56")`, `money(x)`, `today()`, `date_add(d, 30)`, `format_date`, `days_between`, `replace`, `split`, `join`, `regex_find`, `column(tabela, "Valor")`, `records(tabela)`… |
 
 ### 3.3 Ciclo de vida do robô (`bots.py`)
@@ -181,7 +182,7 @@ código do robô.
 | Construtor (montar, conferir, salvar, testar com resultado por passo) no navegador real | **Testado aqui** |
 | PDF (texto, procurar, campos, juntar, separar), NF-e e XML, pastas, zip, JSON, Excel, dados, painéis | **Testado aqui** |
 | E-mail: filtros e anexos (IMAP simulado), SMTP (simulado) | **Testado aqui** |
-| Motor, validador, bots, revisão, ensaio, consertar, inserir passos, iframes, gravação, cofre, API, telas | **Testado aqui** (104 testes automáticos + navegador real headless) |
+| Motor, validador, bots, revisão, ensaio, consertar, inserir passos, iframes, gravação, cofre, API, telas | **Testado aqui** (107 testes automáticos + navegador real headless) |
 | Importar gravação do SAP (.vbs → passos) | **Testado** (conversão). Rodar no SAP: **não testado** |
 | Execução real no SAP, Outlook, Excel via COM (`excel_refresh`), programas Windows, DPAPI | **Não testado** — exigem Windows com esses programas |
 | PDF escaneado (imagem) | Não suportado: o texto vem vazio (`pdf_info` avisa) |
