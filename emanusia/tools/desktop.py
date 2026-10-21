@@ -63,7 +63,7 @@ def desktop_read(window: str):
     return "\n".join(t for t in _win(window).texts() if t)[:8000]
 
 
-@tool("desktop_click_xy", "Clica em coordenadas da tela (use com vision_locate).",
+@tool("desktop_click_xy", "Clica em coordenadas da tela (x, y em pixels).",
       {"x": {"type": "integer"}, "y": {"type": "integer"}}, ("x", "y"), risky=True)
 def desktop_click_xy(x: int, y: int):
     import pyautogui

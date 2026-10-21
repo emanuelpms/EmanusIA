@@ -6,7 +6,7 @@
 - Acessos "compartilhados" (conta de serviço) só podem ser criados por admin e valem para todos
   que não tiverem um acesso próprio com o mesmo nome.
 - Senhas criptografadas (Fernet/AES). No Windows a chave é protegida pelo DPAPI (só o usuário do
-  Windows que rodou o EmanusIA consegue abri-la). Senha nunca volta pela API, nunca vai para o LLM,
+  Windows que rodou o EmanusIA consegue abri-la). Senha nunca volta pela API, nunca vai para o código do robô,
   para o YAML, para eventos ou para a auditoria."""
 import base64
 import json

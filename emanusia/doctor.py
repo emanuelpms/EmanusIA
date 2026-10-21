@@ -4,10 +4,7 @@ import importlib
 import logging
 import os
 import sys
-import time
 from logging.handlers import RotatingFileHandler
-
-import httpx
 
 from . import config
 
@@ -78,56 +75,6 @@ def check_browser():
                      "Rode: .venv\\Scripts\\python -m playwright install chromium")
 
 
-def check_ai(full: bool = True) -> list[dict]:
-    from .llm import LLMError, OllamaClient, has_model
-    out = []
-    c = OllamaClient()
-    h = c.health()
-    out.append(_item("Ollama (IA local)", h["running"], c.url if h["running"] else h["message"],
-                     "" if h["running"] else "Instale/abra o Ollama (ollama.com). Ele fica perto do relógio do Windows."))
-    if not h["running"]:
-        return out
-    ok_model = has_model(c.model, h["models"])
-    out.append(_item(f"Modelo {c.model}", ok_model, "instalado" if ok_model else "não instalado",
-                     "" if ok_model else f"No Prompt de Comando: ollama pull {c.model}"))
-    vision = config.settings()["vision_model"]
-    vis_ok = has_model(vision, h["models"])
-    out.append(_item(f"Modelo de visão {vision}", vis_ok, "instalado" if vis_ok else "não instalado (opcional)",
-                     "" if vis_ok else f"Opcional: ollama pull {vision}", level=None if vis_ok else "aviso"))
-    if not (ok_model and full):
-        return out
-    tool = {"type": "function", "function": {"name": "confirmar", "description": "Confirma que está funcionando",
-                                             "parameters": {"type": "object", "properties": {"ok": {"type": "boolean"}},
-                                                            "required": ["ok"]}}}
-    t0 = time.time()
-    try:
-        msg = c.chat([{"role": "user", "content": "Chame a ferramenta confirmar com ok=true."}], [tool])
-        secs = time.time() - t0
-        used = bool(msg.get("tool_calls"))
-        out.append(_item("IA usando ferramentas", used, f"respondeu em {secs:.0f}s" + ("" if used else " mas não chamou a ferramenta"),
-                         "" if used else "Use qwen2.5:7b em Ajustes (modelos sem ferramentas não criam robôs).",
-                         level=None if used else "aviso"))
-        if secs > 90:
-            out.append(_item("Velocidade da IA", False, f"{secs:.0f}s para uma resposta curta",
-                             "Provavelmente rodando sem a placa de vídeo: atualize o driver da NVIDIA e reinicie o Ollama.",
-                             level="aviso"))
-    except LLMError as e:
-        out.append(_item("IA usando ferramentas", False, str(e), "Veja a mensagem ao lado."))
-        return out
-    try:  # a IA está na placa de vídeo?
-        ps = httpx.get(f"{c.url}/api/ps", timeout=5).json().get("models", [])
-        m = next((x for x in ps if x.get("name", "").startswith(c.model.split(":")[0])), None)
-        if m is not None:
-            vram, size = m.get("size_vram", 0), m.get("size", 0) or 1
-            share = vram / size
-            out.append(_item("Placa de vídeo (GPU)", share > 0.5, f"{share:.0%} do modelo na GPU",
-                             "" if share > 0.5 else "O modelo está rodando no processador (lento). Atualize o driver NVIDIA, "
-                             "feche jogos e reinicie o Ollama.", level=None if share > 0.5 else "aviso"))
-    except Exception:
-        pass
-    return out
-
-
 def check_vault():
     try:
         from . import vault
@@ -169,7 +116,7 @@ def recent_errors(n: int = 5) -> list[str]:
 
 
 def run(full: bool = True) -> dict:
-    items = [check_python(), check_folders(), check_packages(), check_browser(), *check_ai(full),
+    items = [check_python(), check_folders(), check_packages(), check_browser(),
              check_vault(), *check_windows()]
     return {"ok": all(i["ok"] or i["level"] == "aviso" for i in items), "items": items, "errors": recent_errors(),
             "log": str(config.data_dir() / "logs" / "emanusia.log")}

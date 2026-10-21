@@ -1,4 +1,4 @@
-# Exemplo: lê um CSV do workspace e gera Excel + dashboard + dataset Power BI (sem LLM).
+# Exemplo: lê um CSV do workspace e gera Excel + dashboard + dataset Power BI.
 name: exemplo-relatorio
 description: Vendas por mês -> Excel, dashboard e Power BI
 params: {}

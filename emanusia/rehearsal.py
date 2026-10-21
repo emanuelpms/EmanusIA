@@ -66,13 +66,26 @@ def rehearse(bot_id: str, user: auth.User, confirm=None, params: dict | None = N
     steps: list[dict] = []
     code = b.code
 
+    started = {"t": time.time()}
+
+    def track(kind, ev):  # marca o início de cada passo (para medir quanto tempo levou)
+        if kind == "step":
+            started["t"] = time.time()
+        if emit:
+            emit(kind, ev)
+
     def on_step(path, step, ok, res):
         n = len(steps) + 1
         shot = f"{n}.jpg" if _screenshot(d / f"{n}.jpg") else None
-        steps.append({"path": path, "text": plain.describe_step(step), "ok": ok, "shot": shot,
-                      "error": None if ok else plain.explain_error(res, step)})
+        item = {"path": path, "text": plain.describe_step(step), "ok": ok, "shot": shot,
+                "error": None if ok else plain.explain_error(res, step),
+                "secs": round(time.time() - started["t"], 2),
+                "preview": plain.preview(res) if ok else None}
+        steps.append(item)
+        if emit:
+            emit("step_done", {"kind": "step_done", **item})
 
-    runner = Runner(user, confirm, b.id, emit, on_step=on_step)
+    runner = Runner(user, confirm, b.id, track, on_step=on_step)
     events.emit("job_start", bot=b.id, text="ensaio")
     ok, err = True, None
     try:

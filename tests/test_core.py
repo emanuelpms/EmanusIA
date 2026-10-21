@@ -4,45 +4,13 @@ import pytest
 import yaml
 
 from emanusia import config
-from emanusia.agent import Agent
-from emanusia.tools import load_all, registry
+from emanusia.tools import registry
 from emanusia.tools.workflow import render, run_steps
-
-
-class FakeLLM:
-    """Roteiro: 1) chama excel_write 2) responde."""
-    def __init__(self, script): self.script = list(script)
-    def chat(self, messages, tools): return self.script.pop(0)
-
-
-def call(name, args): return {"function": {"name": name, "arguments": args}}
 
 
 def test_path_traversal_blocked():
     with pytest.raises(PermissionError):
         config.safe_path("../fora.txt")
-
-
-def test_agent_loop_runs_tools_and_returns_answer():
-    llm = FakeLLM([
-        {"role": "assistant", "tool_calls": [call("excel_write", {"path": "a.xlsx", "sheets": {"S": [["a", "b"], [1, 2]]}})]},
-        {"role": "assistant", "content": "pronto"}])
-    assert Agent(llm).run("faça") == "pronto"
-    assert (config.workspace() / "a.xlsx").exists()
-
-
-def test_risky_tool_blocked_without_confirmation():
-    llm = FakeLLM([{"role": "assistant", "tool_calls": [call("sap_set_field", {"field_id": "x", "value": "1"})]},
-                   {"role": "assistant", "content": "ok"}])
-    events = []
-    Agent(llm, on_event=lambda k, d: events.append((k, d))).run("x")
-    assert "não autorizada" in events[-1][1]["result"]["error"]
-
-
-def test_tool_error_is_fed_back_not_raised():
-    llm = FakeLLM([{"role": "assistant", "tool_calls": [call("file_read", {"path": "nao-existe.txt"})]},
-                   {"role": "assistant", "content": "falhou"}])
-    assert Agent(llm).run("x") == "falhou"
 
 
 def test_render_preserves_types():

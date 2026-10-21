@@ -27,7 +27,9 @@ Tipos de passo:
   - fail: "Mensagem de erro"
 
 Expressões: aritmética, comparações, and/or/not, in, índices/fatias e as funções
-len int float str round sum min max abs bool lower upper strip contains range.
+len int float str round sum min max abs bool lower upper strip contains range title replace split
+join startswith endswith zfill regex_find to_number money today now date_add format_date
+days_between column records get first last unique sorted.
 Não há acesso a atributos, imports nem código Python arbitrário.
 """
 import ast
@@ -123,10 +125,110 @@ def _rng(*a):
     return r
 
 
+def _date(v):
+    from datetime import date, datetime
+    if isinstance(v, datetime):
+        return v
+    if isinstance(v, date):
+        return datetime(v.year, v.month, v.day)
+    s = str(v).strip()[:19]
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d", "%d/%m/%Y %H:%M",
+                "%d/%m/%Y", "%d/%m/%y", "%d-%m-%Y", "%Y%m%d"):
+        try:
+            return datetime.strptime(s[:len(datetime.now().strftime(fmt))], fmt)
+        except ValueError:
+            continue
+    raise ValueError(f"data inválida: {v}")
+
+
+def _fmt_date(v, fmt="%d/%m/%Y"):
+    return _date(v).strftime(str(fmt))
+
+
+def _today(fmt="%Y-%m-%d"):
+    import datetime as dt
+    return dt.datetime.now().strftime(str(fmt))
+
+
+def _date_add(v, days=0, months=0, fmt="%Y-%m-%d"):
+    import calendar
+    import datetime as dt
+    d = _date(v) + dt.timedelta(days=float(days))
+    if months:
+        m = d.month - 1 + int(months)
+        y, m = d.year + m // 12, m % 12 + 1
+        d = d.replace(year=y, month=m, day=min(d.day, calendar.monthrange(y, m)[1]))
+    return d.strftime(str(fmt))
+
+
+def _to_number(v):
+    """'R$ 1.234,56' -> 1234.56; '12%' -> 12.0; números passam direto; vazio -> 0."""
+    if isinstance(v, bool | int | float):
+        return v
+    s = re.sub(r"[^\d,.\-]", "", str(v))
+    if not s or s in "-.,":
+        return 0
+    if "," in s:
+        s = s.replace(".", "").replace(",", ".")
+    elif s.count(".") > 1:
+        s = s.replace(".", "")
+    n = float(s)
+    return int(n) if n.is_integer() and "." not in s else n
+
+
+def _money(v, symbol="R$ "):
+    n = float(_to_number(v))
+    txt = f"{abs(n):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    return f"{'-' if n < 0 else ''}{symbol}{txt}"
+
+
+def _regex_find(text, pattern, group=0):
+    m = re.search(str(pattern), str(text), re.I)
+    return (m.group(int(group)) if m else "")
+
+
+def _column(table, name):
+    """Valores de uma coluna de uma tabela ([[cabeçalho], [linha]...] ou [{coluna: valor}])."""
+    if isinstance(table, dict) and "rows" in table:
+        table = table["rows"]
+    if not table:
+        return []
+    if isinstance(table[0], dict):
+        return [r.get(name) for r in table]
+    idx = [str(c) for c in table[0]].index(str(name))
+    return [r[idx] if idx < len(r) else None for r in table[1:]]
+
+
+def _records(table):
+    """Tabela -> lista de {coluna: valor} (para repetir linha a linha usando os nomes das colunas)."""
+    if isinstance(table, dict) and "rows" in table:
+        table = table["rows"]
+    if not table or isinstance(table[0], dict):
+        return list(table or [])
+    head = [str(c) for c in table[0]]
+    return [dict(zip(head, r)) for r in table[1:]]
+
+
+def _get(obj, key, default=None):
+    try:
+        return obj[key] if not isinstance(obj, list) else obj[int(key)]
+    except (KeyError, IndexError, TypeError, ValueError):
+        return default
+
+
 FUNCS = {"len": len, "int": int, "float": float, "str": str, "round": round, "sum": sum,
          "min": min, "max": max, "abs": abs, "bool": bool, "range": _rng,
          "lower": lambda s: str(s).lower(), "upper": lambda s: str(s).upper(),
-         "strip": lambda s: str(s).strip(), "contains": lambda a, b: b in a}
+         "strip": lambda s: str(s).strip(), "contains": lambda a, b: b in a,
+         "title": lambda s: str(s).title(), "replace": lambda s, a, b: str(s).replace(str(a), str(b)),
+         "split": lambda s, sep=None: str(s).split(sep), "join": lambda lst, sep=", ": str(sep).join(map(str, lst)),
+         "startswith": lambda s, p: str(s).startswith(str(p)), "endswith": lambda s, p: str(s).endswith(str(p)),
+         "zfill": lambda s, n: str(s).zfill(int(n)), "regex_find": _regex_find,
+         "to_number": _to_number, "money": _money, "today": _today, "date_add": _date_add,
+         "format_date": _fmt_date, "days_between": lambda a, b: (_date(b) - _date(a)).days,
+         "column": _column, "records": _records, "get": _get, "first": lambda l: l[0] if l else None,
+         "last": lambda l: l[-1] if l else None, "unique": lambda l: list(dict.fromkeys(l)),
+         "sorted": lambda l: sorted(l), "now": lambda: _today("%Y-%m-%d %H:%M")}
 _BIN = {ast.Add: lambda a, b: a + b, ast.Sub: lambda a, b: a - b, ast.Mult: lambda a, b: a * b,
         ast.Div: lambda a, b: a / b, ast.Mod: lambda a, b: a % b, ast.FloorDiv: lambda a, b: a // b}
 _CMP = {ast.Eq: lambda a, b: a == b, ast.NotEq: lambda a, b: a != b, ast.Lt: lambda a, b: a < b,

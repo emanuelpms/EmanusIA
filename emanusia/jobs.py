@@ -1,7 +1,8 @@
-"""Fila de tarefas: agente (chat), bots, workflows, gravações e geração de código.
+"""Fila de tarefas: bots, testes (ensaios), workflows e gravações.
 Uma tarefa por vez roda no 'worker' (o Playwright e o SAP GUI não são thread-safe); as demais
 ficam na fila. A gravação usa thread própria. Ações de risco pausam a tarefa (waiting_approval)
 até alguém aprovar na GUI. Tudo que acontece vira evento para o painel do escritório."""
+import logging
 import threading
 import time
 import uuid
@@ -9,16 +10,11 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Callable
 
-import logging
-
 from . import auth, bots, events, plain, scheduler
-from .agent import Agent
-from .llm import OllamaClient
 from .tools import load_all
 from .tools.workflow import load_workflow, run_steps
 
 APPROVAL_TIMEOUT = 600
-ASSISTANT = "assistente"  # personagem do escritório que representa o chat
 
 
 @dataclass
@@ -48,10 +44,9 @@ class Job:
 
 
 class JobManager:
-    def __init__(self, llm_factory: Callable = OllamaClient):
+    def __init__(self):
         load_all()
         self.jobs: dict[str, Job] = {}
-        self.llm_factory = llm_factory
         self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="emanusia-worker")
 
     # ---- infra ----
@@ -61,7 +56,7 @@ class JobManager:
                 return auto
             job.pending = {"tool": name, "args": args, "text": plain.describe_action(name, args)}
             job.status = "waiting_approval"
-            events.emit("waiting", bot=job.bot or ASSISTANT, job=job.id, text=f"aprovar {name}?")
+            events.emit("waiting", bot=job.bot, job=job.id, text=f"aprovar {name}?")
             job._approval.clear()
             got = job._approval.wait(APPROVAL_TIMEOUT)
             ok = got and job._approved
@@ -72,7 +67,7 @@ class JobManager:
 
     def _start(self, job: Job, fn: Callable[[Job], object], own_thread=False) -> Job:
         self.jobs[job.id] = job
-        actor = job.bot or (ASSISTANT if job.kind == "agent" else None)
+        actor = job.bot
 
         def runner():
             job.status = "running"
@@ -99,27 +94,13 @@ class JobManager:
         """bot_id -> status das tarefas em andamento/fila (para o escritório)."""
         out = {}
         for j in self.jobs.values():
-            actor = j.bot or (ASSISTANT if j.kind == "agent" else None)
+            actor = j.bot
             if actor and j.status in ("queued", "running", "waiting_approval"):
                 if out.get(actor) != "running":
                     out[actor] = j.status
         return out
 
     # ---- tipos de tarefa ----
-    def submit_agent(self, task: str, user: auth.User, history: list | None = None) -> Job:
-        job = Job("agent", task[:80], user.name)
-
-        def on_event(k, d, j=job):
-            j.events.append({"kind": k, **d})
-            if k == "tool_call":
-                events.emit("step", bot=ASSISTANT, text=d["name"])
-
-        def fn(j: Job):
-            agent = Agent(self.llm_factory(), confirm=self._confirm_for(j, None), user=user,
-                          on_event=on_event)
-            return agent.run(task, history)
-        return self._start(job, fn)
-
     def _auto(self, approve_risky, user):
         """True = aprova tudo (checkbox / agendamento 'sem supervisão'); False = nega;
         None = pergunta passo a passo na GUI. Quem não pode aprovar nunca aprova."""
@@ -195,11 +176,6 @@ class JobManager:
             raise KeyError(bot_id)
         job = Job("teach", f"Ensinando mais passos: {b.name}", user.name)
         return self._start(job, lambda j: record_insert(bot_id, after, user, j._stop, url, self._confirm_for(j, None)))
-
-    def submit_generate(self, description: str, user: auth.User) -> Job:
-        from .botgen import generate
-        job = Job("generate", f"Gerar bot: {description[:60]}", user.name)
-        return self._start(job, lambda j: generate(description, self.llm_factory(), user))
 
     def submit_record(self, url: str, name: str, user: auth.User) -> Job:
         from .recorder import record

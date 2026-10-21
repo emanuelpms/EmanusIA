@@ -6,7 +6,7 @@
 - Extração estruturada de listas/cartões (`web_extract`) e tabelas (`web_table`).
 - Sessão persistente (`web_save_session` / `web_open session=`): faça login (inclusive MFA) uma vez,
   salve os cookies e os bots reaproveitam. Fica em data/web_sessions (fora do workspace).
-- Senhas: `web_fill_secret` lê de variável de ambiente; o LLM e o YAML nunca veem a senha.
+- Senhas: `web_fill_secret` lê de variável de ambiente; o YAML nunca vê a senha.
 Seletores: CSS, "text=Entrar", "role=button[name='Salvar']", "xpath=//td[2]". Havendo mais de um
 elemento, usa o primeiro visível na ordem do DOM: prefira seletores específicos."""
 import os

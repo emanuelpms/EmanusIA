@@ -56,7 +56,7 @@ def test_describe_control_flow_and_selectors():
                       {"tool": "email_send", "args": {"to": "fin@x.com", "subject": "Relatório", "body": "."}, "retry": 2}]}
     d = plain.describe_code(code)
     assert [(x["path"], x["text"]) for x in d] == [
-        ("1", "Se quantidade de (pedidos) > 0:"), ("1.1", "Clicar em “Próxima”"), ("1.else", "Senão:"),
+        ("1", "Se «Pedidos» tem algum item:"), ("1.1", "Clicar em “Próxima”"), ("1.else", "Senão:"),
         ("1.else.1", "Parar com o aviso: Sem pedidos"),
         ("2", "Enviar e-mail para fin@x.com — “Relatório” — tenta 3 vezes se falhar")]
     assert plain._step_at(code, "1.else.1") == {"fail": "Sem pedidos"}

@@ -2,9 +2,6 @@ import argparse
 import json
 import sys
 
-from . import config
-from .agent import Agent
-from .llm import OllamaClient
 from .tools import load_all
 from .tools.workflow import load_workflow, run_steps
 
@@ -12,11 +9,6 @@ from .tools.workflow import load_workflow, run_steps
 def _confirm(name: str, args: dict) -> bool:
     print(f"\n⚠️  Ação de risco: {name} {json.dumps(args, ensure_ascii=False)[:300]}")
     return input("Autorizar? [s/N] ").strip().lower() in ("s", "y")
-
-
-def _event(kind: str, data: dict):
-    if kind == "tool_call":
-        print(f"  → {data['name']}({json.dumps(data['args'], ensure_ascii=False)[:200]})")
 
 
 def main(argv=None):
@@ -27,10 +19,7 @@ def main(argv=None):
             pass
     ap = argparse.ArgumentParser("emanusia")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("chat", help="conversa com o robô no terminal")
-    r = sub.add_parser("run", help="executa uma tarefa única em linguagem natural")
-    r.add_argument("task")
-    w = sub.add_parser("workflow", help="roda uma automação salva (sem LLM)")
+    w = sub.add_parser("workflow", help="roda uma automação salva")
     w.add_argument("name")
     w.add_argument("-p", "--param", action="append", default=[], help="chave=valor")
     s = sub.add_parser("serve", help="API + interface web (sem abrir janela)")
@@ -134,31 +123,6 @@ def main(argv=None):
         wf = load_workflow(a.name)
         params = dict(p.split("=", 1) for p in a.param)
         print(json.dumps(run_steps(wf, params, confirm=_confirm), ensure_ascii=False, indent=2))
-    else:
-        agent = Agent(OllamaClient(), confirm=_confirm, on_event=_event)
-        from .llm import LLMError
-        if a.cmd == "run":
-            try:
-                print(agent.run(a.task))
-            except LLMError as e:
-                print(f"❌ {e}")
-                return 1
-        else:
-            print(f"EmanusIA ({config.settings()['model']}) — workspace: {config.workspace()}. Ctrl+C sai.")
-            hist: list[dict] = []
-            while True:
-                try:
-                    task = input("\nvocê> ").strip()
-                except (EOFError, KeyboardInterrupt):
-                    return 0
-                if task:
-                    try:
-                        ans = agent.run(task, hist)
-                    except LLMError as e:
-                        print(f"\n❌ {e}")
-                        continue
-                    hist += [{"role": "user", "content": task}, {"role": "assistant", "content": ans}]
-                    print(f"\nrobô> {ans}")
     return 0
 
 

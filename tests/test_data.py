@@ -223,14 +223,6 @@ def test_dashboard_data_interactive_html(headless):
     assert marco == "2"
 
 
-def test_data_tools_offered_for_analysis_tasks():
-    from emanusia.agent import Agent
-    names = {s["function"]["name"] for s in Agent(object()).tools_for("analise a planilha de vendas e faça um dashboard")}
-    assert {"data_query", "excel_dashboard", "dashboard_data"} <= names
-    names = {s["function"]["name"] for s in Agent(object()).tools_for("entrar no portal com meu login")}
-    assert "web_login" in names
-
-
 def test_dashboard_bar_axes_are_categories_not_dates(headless):
     """Regressão: o eixo de data de um gráfico mensal contaminava os gráficos de barra."""
     call("dashboard_data", {"path": "p2.html", "source": VENDAS, "title": "t",

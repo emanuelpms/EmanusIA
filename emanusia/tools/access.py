@@ -1,4 +1,4 @@
-"""Logins usando o cofre de acessos (vault.py). O LLM e o código do bot só conhecem o NOME do acesso;
+"""Logins usando o cofre de acessos (vault.py). O código do bot só conhece o NOME do acesso;
 o usuário e a senha vêm do cofre de quem está executando."""
 from .. import auth, vault
 from .registry import tool

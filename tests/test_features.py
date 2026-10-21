@@ -7,7 +7,6 @@ import yaml
 from fastapi.testclient import TestClient
 
 from emanusia import auth, config, scheduler
-from emanusia.agent import Agent
 from emanusia.recorder import Recorder
 from emanusia.tools import registry
 from emanusia.tools.workflow import run_steps
@@ -85,19 +84,10 @@ def test_auth_password_login_and_last_admin_protected():
         auth.add_user("x", "curta", "operator")
 
 
-def test_tool_whitelist_and_viewer_blocked_in_agent():
-    class LLM:
-        def __init__(self): self.n = 0
-        def chat(self, m, t):
-            self.n += 1
-            if self.n == 1:
-                return {"role": "assistant", "tool_calls": [
-                    {"function": {"name": "file_write", "arguments": {"path": "x.txt", "content": "a"}}}]}
-            return {"role": "assistant", "content": "fim"}
+def test_tool_whitelist_and_viewer_blocked():
     limited = auth.User("bob", "operator", tools=["file_read"])
-    ev = []
-    Agent(LLM(), user=limited, on_event=lambda k, d: ev.append(d)).run("x")
-    assert "sem permissão" in ev[-1]["result"]["error"]
+    with pytest.raises(Exception, match="sem permissão"):
+        run_steps({"steps": [{"tool": "file_write", "args": {"path": "x.txt", "content": "a"}}]}, user=limited)
     assert not (config.workspace() / "x.txt").exists()
     viewer = auth.User("v", "viewer")
     assert not viewer.may_use_tool("file_read")
@@ -134,18 +124,6 @@ def test_sql_query_readonly_guard_and_result():
             registry.call("sql_query", {"database": "t.db", "sql": bad})
 
 
-# ---------- visão ----------
-def test_vision_locate_parses_model_answer(monkeypatch):
-    from emanusia.tools import vision
-    from emanusia import llm
-    monkeypatch.setattr(vision, "_screenshot", lambda s: b"png")
-    monkeypatch.setattr(llm.OllamaClient, "vision", lambda self, p, imgs, model=None: 'Claro! {"x": 120, "y": 45}')
-    assert registry.call("vision_locate", {"description": "botão salvar"}) == {"x": 120, "y": 45}
-    monkeypatch.setattr(llm.OllamaClient, "vision", lambda self, p, imgs, model=None: '{"x": null, "y": null}')
-    with pytest.raises(LookupError):
-        registry.call("vision_locate", {"description": "nada"})
-
-
 # ---------- API / GUI ----------
 @pytest.fixture
 def client():
@@ -172,7 +150,7 @@ def test_login_flow_and_roles(client):
     viewer = TestClient(client.app, headers=H)
     assert viewer.post("/api/login", json={"user": "vic", "password": "senha-forte-2"}).status_code == 200
     assert viewer.get("/api/workflows").status_code == 200
-    assert viewer.post("/api/jobs/agent", json={"task": "oi"}).status_code == 403
+    assert viewer.post("/api/jobs/workflow", json={"name": "x"}).status_code == 403
     assert viewer.get("/api/users").status_code == 403
     assert client.post("/api/login", json={"user": "ana", "password": "senha-forte-1"}).status_code == 200
     assert client.get("/api/users").status_code == 200

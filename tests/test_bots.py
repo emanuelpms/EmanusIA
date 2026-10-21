@@ -5,7 +5,7 @@ import pytest
 import yaml
 from fastapi.testclient import TestClient
 
-from emanusia import auth, bots, config, events, learning
+from emanusia import auth, bots, config, events
 from emanusia.engine import Runner, WorkflowError, safe_eval, validate
 from emanusia.tools import registry
 from emanusia.tools.registry import tool
@@ -94,7 +94,7 @@ def test_engine_risky_needs_confirmation():
 
 
 # ---------------------------------------------------------------- validação
-def test_validation_catches_llm_mistakes():
+def test_validation_catches_common_mistakes():
     wf = {"steps": [
         {"tool": "nao_existe"},
         {"tool": "web_open", "args": {"link": "x"}},                         # arg inventado + falta url
@@ -178,99 +178,6 @@ def test_other_users_cannot_run_unvalidated_or_foreign_draft():
     bots.ensure_runnable(bots.get_bot(b.id), bob)      # ativo: a equipe pode rodar
     with pytest.raises(PermissionError):
         bots.update_bot(b.id, bob, description="x")
-
-
-# ---------------------------------------------------------------- geração por IA
-class ScriptLLM:
-    def __init__(self, answers):
-        self.answers, self.seen = list(answers), []
-
-    def chat(self, messages, tools=None):
-        self.seen.append(messages[-1]["content"])
-        return {"role": "assistant", "content": self.answers.pop(0)}
-
-
-def test_botgen_self_corrects_with_validator_feedback():
-    from emanusia.botgen import generate
-    bad = "```yaml\nsteps:\n  - tool: excel_criar\n    args: {path: a.xlsx}\n```"
-    good = "```yaml\nparams: {}\nsteps:\n  - tool: excel_write\n    args: {path: a.xlsx, sheets: {A: [[1]]}}\n```"
-    llm = ScriptLLM([bad, good])
-    res = generate("gerar uma planilha de teste", llm, ADMIN)
-    assert res["validation"]["ok"] and res["attempts"] == 2
-    assert "excel_criar" in llm.seen[1]  # o erro do validador voltou para o modelo
-
-
-def test_botgen_returns_best_effort_when_never_valid():
-    from emanusia.botgen import generate
-    res = generate("algo impossível", ScriptLLM(["não sei"] * 3), ADMIN)
-    assert not res["validation"]["ok"] and res["attempts"] == 3
-
-
-# ---------------------------------------------------------------- aprendizado
-def _learn(task, url):
-    learning.record_task("local", task, [
-        {"name": "web_open", "args": {"url": url}, "ok": True},
-        {"name": "web_table", "args": {"selector": "table"}, "ok": True},
-        {"name": "web_click", "args": {"selector": "#x"}, "ok": False},  # erro não entra na receita
-        {"name": "excel_write", "args": {"path": "r.xlsx", "sheets": {"A": [[1]]}}, "ok": True}], True)
-
-
-def test_learning_suggests_parametrized_bot_and_accept_creates_it():
-    for i, u in enumerate(["https://a.com/1", "https://a.com/2", "https://a.com/3"]):
-        _learn(f"baixar tabela de pedidos do portal {i}", u)
-    sg = learning.suggestions()
-    assert len(sg) == 1
-    s = sg[0]
-    assert s["count"] == 3 and s["tools"] == ["web_open", "web_table", "excel_write"]
-    assert s["name"] == "Baixar tabela pedidos portal"
-    assert s["code"]["params"] == {"url": "https://a.com/3"}
-    assert s["code"]["steps"][0]["args"]["url"] == "{{url}}"
-    assert s["code"]["steps"][2]["args"]["path"] == "r.xlsx"  # igual sempre: fica fixo
-    b = learning.accept(s["id"], ADMIN, "Coletor Pedidos", "Vendas")
-    assert b.status == "validated" and b.origin == "sugestao"
-    assert learning.suggestions() == []  # não sugere de novo
-
-
-def test_learning_similar_tasks_become_hints():
-    _learn("baixar tabela de pedidos do portal", "https://a.com")
-    hints = learning.similar("Baixar a tabela de pedidos do portal hoje")
-    assert hints and hints[0]["steps"][0]["tool"] == "web_open"
-    assert learning.similar("mandar flores") == []
-
-
-def test_auto_create_makes_draft_bots_only_when_enabled():
-    config.save_settings(auto_create_bots=True, suggest_min_repeats=2)
-    _learn("rotina x", "https://a.com/1")
-    _learn("rotina x", "https://a.com/2")
-    made = [b for b in bots.list_bots() if b.origin == "auto"]
-    assert len(made) == 1 and made[0].status in ("validated", "draft") and made[0].status != "active"
-
-
-def test_agent_records_successful_tasks():
-    from emanusia.agent import Agent
-
-    class LLM:
-        def __init__(self): self.n = 0
-        def chat(self, m, tools):
-            self.n += 1
-            if self.n == 1:
-                return {"role": "assistant", "tool_calls": [{"function": {"name": "file_write",
-                        "arguments": {"path": "x.txt", "content": "a"}}}]}
-            return {"role": "assistant", "content": "feito"}
-    Agent(LLM()).run("escrever arquivo x")
-    t = learning.load_tasks()
-    assert t[-1]["success"] and t[-1]["steps"][0]["tool"] == "file_write"
-
-
-def test_tool_routing_keeps_prompt_small():
-    from emanusia.agent import Agent
-    names = lambda task: {s["function"]["name"] for s in Agent(ScriptLLM([])).tools_for(task)}
-    web = names("abra o portal www.fornecedor.com e baixe a nota")
-    assert "web_open" in web and "sap_run_transaction" not in web and "excel_write" in web
-    sap = names("rodar a transação VA01 no SAP")
-    assert "sap_run_transaction" in sap and "web_click" not in sap
-    generic = names("xyz qualquer coisa")  # sem pista: só o básico (tudo não cabe no contexto de 8k)
-    assert "create_bot" in generic and "sap_run_transaction" not in generic and len(generic) < 20
 
 
 # ---------------------------------------------------------------- e-mail
@@ -395,15 +302,6 @@ def test_api_validate_endpoint(client):
     r = client.post("/api/validate", json={"yaml": "steps:\n  - tool: web_open\n"}).json()
     assert not r["ok"] and "exige o argumento 'url'" in r["errors"][0]
     assert not client.post("/api/validate", json={"yaml": "steps: [\n"}).json()["ok"]
-
-
-def test_api_generate_job(client, monkeypatch):
-    from emanusia import api
-    ok = "params: {}\nsteps:\n  - log: oi\n"
-    monkeypatch.setattr(api.manager, "llm_factory", lambda: ScriptLLM([ok]))
-    jid = client.post("/api/bots/generate", json={"description": "um bot que diz oi no log"}).json()["id"]
-    j = _wait(client, jid)
-    assert j["status"] == "done" and j["result"]["validation"]["ok"]
 
 
 def test_office_hides_other_users_details(client):

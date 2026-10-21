@@ -47,7 +47,19 @@ def _short(v, n=60) -> str:
 
 
 def _file(p) -> str:
-    return str(p).split("/")[-1]
+    return str(p).replace("\\", "/").split("/")[-1]
+
+
+def _files(v) -> str:
+    if isinstance(v, list):
+        return ", ".join(_file(x) for x in v[:3]) + ("…" if len(v) > 3 else "")
+    v = str(v or "")
+    return f"os arquivos {v}" if any(c in v for c in "*?") else _file(v)
+
+
+FIND = {"cnpj": "CNPJ", "cpf": "CPF", "valor": "valores em R$", "data": "datas", "email": "e-mails",
+        "telefone": "telefones", "cep": "CEP", "chave_nfe": "a chave da nota", "linha_digitavel": "a linha digitável do boleto",
+        "numero": "números"}
 
 
 TOOL_TEXT = {
@@ -73,6 +85,7 @@ TOOL_TEXT = {
     "web_frame": lambda a, s: "Entrar no quadro interno da página" if a.get("selector") else "Voltar para a página principal",
     "web_close": lambda a, s: "Fechar o navegador",
     "excel_write": lambda a, s: f"Criar a planilha {_file(a.get('path', ''))}",
+    "excel_save": lambda a, s: f"{'Acrescentar na' if a.get('append') else 'Montar a'} planilha {_file(a.get('path', ''))}",
     "excel_dashboard": lambda a, s: f"Montar o dashboard no Excel {_file(a.get('path', ''))}",
     "excel_update": lambda a, s: f"Atualizar a planilha {_file(a.get('path', ''))}",
     "excel_read": lambda a, s: f"Ler a planilha {_file(a.get('path', ''))}",
@@ -109,16 +122,36 @@ TOOL_TEXT = {
     "desktop_start_app": lambda a, s: f"Abrir o programa {_file(a.get('command', ''))}",
     "desktop_click": lambda a, s: f"Clicar em “{a.get('control')}” no programa",
     "desktop_type": lambda a, s: f"Digitar no programa “{_short(a.get('text', ''), 30)}”",
-    "file_write": lambda a, s: f"Salvar o arquivo {_file(a.get('path', ''))}",
+    "file_write": lambda a, s: f"{'Acrescentar no' if a.get('append') else 'Salvar o'} arquivo {_file(a.get('path', ''))}",
+    "file_read": lambda a, s: f"Ler o arquivo {_file(a.get('path', ''))}",
+    "file_list": lambda a, s: f"Listar os arquivos da pasta {a.get('subdir') or 'de trabalho'}" + (f" ({a['pattern']})" if a.get("pattern") not in (None, "", "*") else ""),
+    "file_exists": lambda a, s: f"Ver se existe {_file(a.get('path', ''))}",
+    "file_copy": lambda a, s: f"Copiar {_files(a.get('files'))} para {a.get('destination')}",
+    "file_move": lambda a, s: f"Mover {_files(a.get('files'))} para {a.get('destination')}",
+    "file_rename": lambda a, s: f"Renomear {_file(a.get('path', ''))} para {a.get('new_name')}",
+    "file_delete": lambda a, s: f"Apagar {_files(a.get('files'))}",
+    "file_zip": lambda a, s: f"Compactar {_files(a.get('files'))} em {_file(a.get('output', ''))}",
+    "file_unzip": lambda a, s: f"Descompactar {_file(a.get('path', ''))}",
+    "folder_create": lambda a, s: f"Criar a pasta {a.get('path')}",
+    "json_read": lambda a, s: f"Ler os dados de {_file(a.get('path', ''))}",
+    "json_write": lambda a, s: f"Guardar os dados em {_file(a.get('path', ''))}",
+    "pdf_text": lambda a, s: f"Ler o texto do PDF {_file(a.get('path', ''))}",
+    "pdf_find": lambda a, s: f"Procurar {FIND.get(a.get('find'), 'um padrão')} no " + (f"PDF {_file(a['path'])}" if a.get("path") else "texto"),
+    "pdf_fields": lambda a, s: "Pegar do documento: " + ", ".join(map(str, (a.get("fields") or {}).values())),
+    "pdf_merge": lambda a, s: f"Juntar {_files(a.get('files'))} em {_file(a.get('output', ''))}",
+    "pdf_split": lambda a, s: f"Separar as páginas do PDF {_file(a.get('path', ''))}",
+    "pdf_info": lambda a, s: f"Ver as informações do PDF {_file(a.get('path', ''))}",
+    "xml_read": lambda a, s: f"Ler o XML {_files(a.get('files'))}",
+    "nfe_read": lambda a, s: f"Ler as notas fiscais (NF-e) {_files(a.get('files'))}" + (" com os produtos" if a.get("items") else ""),
     "sql_query": lambda a, s: "Consultar o banco de dados",
     "sql_execute": lambda a, s: "Alterar o banco de dados",
     "http_get": lambda a, s: "Buscar dados de um sistema (API)",
     "http_send": lambda a, s: "Enviar dados para um sistema (API)",
-    "vision_ask": lambda a, s: "Olhar a tela e responder",
 }
 
 ICON = {"web": "🌐", "excel": "📗", "dashboard": "📊", "data": "🧮", "mail": "✉️", "sap": "🟦",
-        "desktop": "🖥", "access": "🔑", "powerbi": "📈", "files": "📄", "connectors": "🔌", "vision": "👁"}
+        "desktop": "🖥", "access": "🔑", "powerbi": "📈", "files": "📁", "connectors": "🔌", "pdf": "📕",
+        "xmldata": "🧾", "botops": "🤝", "workflow": "⚙️"}
 
 
 def _friendly(text: str) -> str:
@@ -148,7 +181,12 @@ def _describe(s: dict) -> str:
     if "if" in s:
         return f"Se {_cond(s['if'])}:"
     if "for_each" in s:
-        return f"Para cada item de {_cond(s['for_each'])}:"
+        fe = str(s["for_each"]).strip()
+        if fe.startswith("range("):
+            return f"Repetir {_cond(fe)}:"
+        if fe.startswith("records("):
+            return f"Para cada linha de {_cond(fe).replace(' (cada linha)', '')}:"
+        return f"Para cada item de {_cond(fe)}:"
     if "while" in s:
         return f"Repetir enquanto {_cond(s['while'])}:"
     if "try" in s:
@@ -168,8 +206,43 @@ def _describe(s: dict) -> str:
     return "Passo"
 
 
+def _var(x: str) -> str:
+    """notas['total_rows'] / linha["Valor"] -> «Notas › total rows» (como a pessoa vê a informação)."""
+    x = x.strip()
+    m = re.fullmatch(r"(\w+)((?:\[[\"'][^\"']+[\"']\])*)", x)
+    if not m:
+        return x
+    parts = [param_label(m.group(1))] + [k.replace("_", " ") for k in re.findall(r"\[[\"']([^\"']+)[\"']\]", m.group(2))]
+    return "«" + " › ".join(parts) + "»"
+
+
+_COND = [  # expressões que o construtor monta, em português
+    (r"bool\((.+)\)", lambda m: f"{_var(m[1])} está preenchido"),
+    (r"not (\w[\w\[\]\"' ]*)", lambda m: f"{_var(m[1])} está vazio"),
+    (r"contains\(lower\(str\((.+)\)\), \"(.*)\"\)", lambda m: f"{_var(m[1])} contém “{m[2]}”"),
+    (r"len\((\w+)\) > 0", lambda m: f"{_var(m[1])} tem algum item"),
+    (r"len\((\w+)\) (>|==) (-?\d+)", lambda m: f"{_var(m[1])} tem {'mais de' if m[2] == '>' else 'exatamente'} {m[3]} item(ns)"),
+    (r"to_number\((.+)\) (==|!=|>=|<=|>|<) (-?[\d.]+)", lambda m: f"{_var(m[1])} {_OPS[m[2]]} {m[3]}"),
+    (r"str\((.+)\) (==|!=) \"(.*)\"", lambda m: f"{_var(m[1])} {_OPS[m[2]]} “{m[3]}”"),
+    (r"(\w+(?:\[[\"'][^\"']+[\"']\])*) (==|!=|>=|<=|>|<) (-?[\d.]+|\"[^\"]*\"|'[^']*'|\w+)",
+     lambda m: f"{_var(m[1])} {_OPS[m[2]]} {m[3]}"),
+]
+_OPS = {"==": "é igual a", "!=": "é diferente de", ">": "é maior que", ">=": "é maior ou igual a", "<": "é menor que",
+        "<=": "é menor ou igual a"}
+
+
 def _cond(e) -> str:
-    t = str(e)
+    t = str(e).strip()
+    for rx, fn in _COND:
+        m = re.fullmatch(rx, t)
+        if m:
+            return fn(m)
+    m = re.fullmatch(r"records\((\w+)\)", t)
+    if m:
+        return f"{_var(m[1])} (cada linha)"
+    m = re.fullmatch(r"range\((\d+)\)", t)
+    if m:
+        return f"{m[1]} vezes"
     for a, b in ((" and ", " e "), (" or ", " ou "), ("not ", "não "), ("len(", "quantidade de ("),
                  ("==", "="), ("!=", "≠"), (">=", "≥"), ("<=", "≤"), ("True", "sempre"), ("False", "nunca")):
         t = t.replace(a, b)
@@ -253,9 +326,6 @@ def _step_at(code: dict | None, path: str | None) -> dict | None:
 def explain_error(err: str, step: dict | None = None) -> str:
     e = str(err or "")
     what = f"“{target(step.get('args') or {}, step)}”" if step and "tool" in step else "o que precisava"
-    m = re.match(r"LLMError:\s*(.+)", e, re.S)
-    if m:  # problema com a IA local: a mensagem já vem explicada
-        return m.group(1).strip()
     rules = [
         (r"Timeout.*(locator|waiting for|wait_for)|strict mode|not visible|element is not",
          f"Não encontrei {what} na tela. O site pode ter mudado ou demorado para carregar. "
@@ -314,3 +384,41 @@ def explain_validation(rep: dict, code: dict | None = None) -> list[str]:
                 break
         out.append(where + (text or msg))
     return out
+
+
+# ---------------------------------------------------------------- prévia do resultado de um passo
+def preview(v, rows: int = 6, cols: int = 8) -> dict:
+    """Resumo curto e seguro do que um passo devolveu, para mostrar no construtor/ensaio."""
+    def cut(x, n=80):
+        s = str(x)
+        return s if len(s) <= n else s[:n - 1] + "…"
+    if isinstance(v, dict) and isinstance(v.get("rows"), list) and v["rows"] and isinstance(v["rows"][0], list):
+        t = v["rows"]
+        total = v.get("total_rows", len(t) - 1)
+        extra = f" · salvo em {v['saved']}" if v.get("saved") else ""
+        return {"text": f"Tabela com {total} linha(s) e {len(t[0])} coluna(s){extra}",
+                "table": [[cut(c, 40) for c in r[:cols]] for r in t[:rows + 1]]}
+    if isinstance(v, list) and v and isinstance(v[0], list):
+        return {"text": f"Tabela com {len(v) - 1} linha(s) e {len(v[0])} coluna(s)",
+                "table": [[cut(c, 40) for c in r[:cols]] for r in v[:rows + 1]]}
+    if isinstance(v, list) and v and isinstance(v[0], dict):
+        head = list(v[0])[:cols]
+        return {"text": f"Lista com {len(v)} item(ns)",
+                "table": [head] + [[cut(r.get(h, ""), 40) for h in head] for r in v[:rows]]}
+    if isinstance(v, list):
+        return {"text": f"Lista com {len(v)} item(ns)" + (": " + ", ".join(cut(x, 40) for x in v[:5]) if v else "")}
+    if isinstance(v, dict):
+        saved = v.get("output") or v.get("path")
+        if isinstance(saved, str) and saved:
+            extra = [f"{v['rows']} linha(s)" if isinstance(v.get("rows"), int) else "",
+                     f"{v['files']} arquivo(s)" if isinstance(v.get("files"), int) else "",
+                     f"+{v['added']} linha(s)" if isinstance(v.get("added"), int) else ""]
+            return {"text": f"Salvo em {saved}" + "".join(f" · {x}" for x in extra if x), "file": saved}
+        if "text" in v and isinstance(v["text"], str):
+            return {"text": f"Texto com {len(v['text'])} letras: " + cut(v["text"].strip().replace("\n", " "), 160)}
+        return {"text": "; ".join(f"{k}: {cut(x, 50)}" for k, x in list(v.items())[:8])}
+    if isinstance(v, bool):
+        return {"text": "Sim" if v else "Não"}
+    if v is None or v == "":
+        return {"text": "Feito"}
+    return {"text": cut(v, 200)}

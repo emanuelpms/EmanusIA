@@ -13,10 +13,9 @@ from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
-from . import auth, bots, config, events, learning, plain, scheduler, vault
+from . import auth, bots, config, events, plain, scheduler, vault
 from .engine import code_hash, validate
 from .jobs import JobManager
-from .llm import OllamaClient
 from .tools import registry
 from .tools.workflow import _path, list_workflows
 
@@ -109,14 +108,10 @@ def me(request: Request):
 
 @app.get("/api/config")
 def get_config(u: auth.User = Depends(current_user)):
-    llm = OllamaClient()
-    return {"settings": config.settings(), "installed_models": llm.models(),
-            "workspace": str(config.workspace())}
+    return {"settings": config.settings(), "workspace": str(config.workspace())}
 
 
 class Settings(BaseModel):
-    model: str | None = None
-    vision_model: str | None = None
     email_provider: str | None = None
     smtp_host: str | None = None
     smtp_port: int | None = None
@@ -124,15 +119,8 @@ class Settings(BaseModel):
     smtp_from: str | None = None
     imap_host: str | None = None
     imap_user: str | None = None
-    auto_create_bots: bool | None = None
-    suggest_min_repeats: int | None = None
     company_name: str | None = None
-
-
-@app.get("/api/health")
-def health(u: auth.User = Depends(current_user)):
-    """A IA local está pronta? (Ollama aberto, modelo instalado) — mostrado no Chat."""
-    return OllamaClient().health()
+    allowed_folders: list[str] | None = None
 
 
 @app.get("/api/doctor")
@@ -147,8 +135,8 @@ def set_settings(b: Settings, u: auth.User = Depends(admin)):
     d = b.model_dump(exclude_none=True)
     if d.get("email_provider", "outlook") not in ("outlook", "smtp"):
         raise HTTPException(422, "email_provider deve ser outlook ou smtp")
-    if d.get("suggest_min_repeats", 3) < 2:
-        raise HTTPException(422, "suggest_min_repeats mínimo é 2")
+    if "allowed_folders" in d:
+        d["allowed_folders"] = [f.strip() for f in d["allowed_folders"] if f.strip()]
     auth.audit(u.name, "settings", **d)
     return config.save_settings(**d)
 
@@ -161,11 +149,6 @@ def tools(u: auth.User = Depends(current_user)):
 
 
 # ---------------- tarefas ----------------
-class AgentTask(BaseModel):
-    task: str
-    history: list = []
-
-
 class WfRun(BaseModel):
     name: str
     params: dict = {}
@@ -186,11 +169,6 @@ def _job(job_id: str, u: auth.User):
     if not j or not _visible(u, j):
         raise HTTPException(404, "tarefa não encontrada")
     return j
-
-
-@app.post("/api/jobs/agent")
-def job_agent(b: AgentTask, u: auth.User = Depends(runner)):
-    return manager.submit_agent(b.task, u, b.history).public()
 
 
 @app.post("/api/jobs/workflow")
@@ -472,11 +450,11 @@ def bots_list(u: auth.User = Depends(current_user)):
 
 @app.post("/api/bots")
 def bot_create(b: BotIn, u: auth.User = Depends(runner)):
-    code = _parse(b.yaml) if b.yaml else None
+    code = b.code if b.code is not None else (_parse(b.yaml) if b.yaml else None)
     try:
         bt = bots.create_bot(b.name or "", u, code, b.team or "Geral", b.role or "worker",
                              b.description or "", origin=b.origin if b.origin in
-                             ("manual", "ia", "gravacao") else "manual")
+                             ("manual", "construtor", "gravacao") else "manual")
     except ValueError as e:
         raise HTTPException(422, str(e))
     if code:
@@ -709,60 +687,6 @@ def reviews(u: auth.User = Depends(current_user)):
             if u.is_admin or b.owner != u.name]
 
 
-class Gen(BaseModel):
-    description: str
-
-
-@app.post("/api/bots/generate")
-def bot_generate(b: Gen, u: auth.User = Depends(runner)):
-    if len(b.description.strip()) < 10:
-        raise HTTPException(422, "descreva melhor o que o bot deve fazer")
-    return manager.submit_generate(b.description, u).public()
-
-
-# ---------------- aprendizado ----------------
-@app.get("/api/suggestions")
-def suggestions(u: auth.User = Depends(current_user)):
-    out = []
-    for s in learning.suggestions():
-        if u.is_admin or u.name in s["users"]:
-            out.append({**s, "yaml": yaml.safe_dump(s["code"], allow_unicode=True, sort_keys=False),
-                        "steps": [d["text"] for d in plain.describe_code(s["code"])],
-                        "params": [plain.param_label(k) for k in s["code"].get("params") or {}]})
-    return out
-
-
-class Accept(BaseModel):
-    name: str | None = None
-    team: str = "Geral"
-
-
-@app.post("/api/suggestions/{sid}/accept")
-def suggestion_accept(sid: str, b: Accept, u: auth.User = Depends(runner)):
-    if not any(s["id"] == sid and (u.is_admin or u.name in s["users"]) for s in learning.suggestions()):
-        raise HTTPException(404)
-    try:
-        return _bot_out(learning.accept(sid, u, b.name, b.team), u)
-    except ValueError as e:
-        raise HTTPException(422, str(e))
-
-
-@app.post("/api/suggestions/{sid}/dismiss")
-def suggestion_dismiss(sid: str, u: auth.User = Depends(runner)):
-    if not any(s["id"] == sid and (u.is_admin or u.name in s["users"]) for s in learning.suggestions()):
-        raise HTTPException(404)
-    learning.dismiss(sid)
-    return {"ok": True}
-
-
-@app.get("/api/learning")
-def learning_stats(u: auth.User = Depends(current_user)):
-    tasks = [t for t in learning.load_tasks() if u.is_admin or t["user"] == u.name]
-    return {"tasks": len(tasks), "success": sum(t["success"] for t in tasks),
-            "recent": [{"ts": t["ts"], "task": t["task"], "success": t["success"],
-                        "tools": [s["tool"] for s in t["steps"]]} for t in tasks[-20:]][::-1]}
-
-
 # ---------------- cofre de acessos ----------------
 class Cred(BaseModel):
     username: str = ""
@@ -823,17 +747,56 @@ def office(since: int = 0, u: auth.User = Depends(current_user)):
                     "mine": mine})
     evs = []
     for e in events.since(since):
-        if e.get("bot") not in visible and e.get("bot") != "assistente":
+        if e.get("bot") not in visible:
             continue
         if not visible.get(e.get("bot"), u.is_admin) and e["kind"] in GENERIC:
             e = {**e, "text": GENERIC[e["kind"]]}  # não vaza dados de bots de outras pessoas
         evs.append(e)
     today = time.strftime("%Y-%m-%d")
     return {"company": config.settings().get("company_name"), "bots": out,
-            "assistant": active.get("assistente", "idle"), "events": evs, "cursor": events.last_id(),
+            "events": evs, "cursor": events.last_id(),
             "runs_today": sum(1 for j in manager.jobs.values()
                               if j.kind in ("bot", "workflow")
                               and time.strftime("%Y-%m-%d", time.localtime(j.created)) == today)}
+
+
+# ---------------- construtor de robôs (sem código) ----------------
+@app.get("/api/catalog")
+def catalog_api(u: auth.User = Depends(current_user)):
+    from . import catalog
+    return catalog.catalog(u)
+
+
+def _err_path(e: str) -> str | None:
+    """'steps[3].else[1]: ...' -> '3.else.1' (mesmo formato de caminho do motor e do ensaio)."""
+    m = re.match(r"steps\[(\d+)\]((?:\.\w+\[\d+\])*)", e)
+    if not m:
+        return None
+    parts = [m.group(1)]
+    for key, n in re.findall(r"\.(\w+)\[(\d+)\]", m.group(2) or ""):
+        parts += [key, n] if key in ("else", "catch") else [n]
+    return ".".join(parts)
+
+
+class BuilderCode(BaseModel):
+    code: dict
+
+
+@app.post("/api/builder/check")
+def builder_check(b: BuilderCode, u: auth.User = Depends(current_user)):
+    """Confere o robô montado no construtor e diz, passo a passo, o que falta."""
+    rep = validate(b.code, u)
+    friendly = plain.explain_validation(rep, b.code)
+    problems = [{"path": _err_path(e), "text": re.sub(r"^Passo [\d →]+: ", "", t), "tech": e}
+                for e, t in zip(rep["errors"], friendly)]
+    warnings = [{"path": _err_path(w), "text": re.sub(r"^steps\[[^:]*:\s*", "", w)} for w in rep["warnings"]]
+    return {"ok": rep["ok"], "problems": problems, "warnings": warnings, "risky_tools": rep["risky_tools"],
+            "steps": plain.describe_code(b.code), "yaml": yaml.safe_dump(b.code, allow_unicode=True, sort_keys=False)}
+
+
+@app.get("/builder", response_class=HTMLResponse)
+def builder_page():
+    return (STATIC / "builder.html").read_text(encoding="utf-8")
 
 
 @app.get("/office", response_class=HTMLResponse)

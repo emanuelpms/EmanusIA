@@ -53,7 +53,7 @@ const T = 16, cv = document.getElementById('cv'), ctx = cv.getContext('2d');
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let SCALE = 3, W = 20, H = 14, tiles = [], solid = new Set(), furn = [], rooms = [], L = null;
-let PER_ROW = 1, chars = new Map(), BOTS = [], ASSIST = 'idle', cursor = 0, layoutSig = '', staticBase = null, staticTop = null;
+let PER_ROW = 1, chars = new Map(), BOTS = [], cursor = 0, layoutSig = '', staticBase = null, staticTop = null;
 const now = () => performance.now();
 const rnd = a => a[Math.floor(Math.random() * a.length)];
 function hash(s) { let h = 7; for (const c of String(s)) h = (h * 31 + c.charCodeAt(0)) | 0; return Math.abs(h); }
@@ -98,7 +98,7 @@ function buildLayout(bots) {
     if (r.kind !== 'server') for (let k = 0; k < Math.floor(r.w / 5); k++) furn.push({type: 'window', x: r.x + 2 + k * 5, y: r.y, w: 2, h: 1, solid: false});
     if (r.kind === 'lobby') {
       put('sofa', ix, iy, 3, 1); put('plant', ix + 3, iy);
-      put('counter', ix + 5, iy + 2, 4, 1); seats.assistente = {x: ix + 6, y: iy + 1, face: 'down'}; spots.assistente = {x: ix + 6, y: iy + 3, face: 'up'};
+      put('counter', ix + 5, iy + 2, 4, 1);
       put('coffee', ix + 13, iy); spots.coffee = {x: ix + 13, y: iy + 1, face: 'up'};
       put('cooler', ix + 14, iy); spots.cooler = {x: ix + 14, y: iy + 1, face: 'up'};
       put('rug', ix + 4, iy + 4, 7, 2, {solid: false});
@@ -232,7 +232,7 @@ const HAIR = ['#3b2a20', '#6b3e26', '#1d1b24', '#c9a063', '#a33b2a', '#5a5a6a', 
 const SKIN = ['#f1c7a3', '#e0b08a', '#c68b62', '#8d5a3b'];
 const LABEL = {web_open: 'abrindo site', web_click: 'clicando', web_fill: 'preenchendo', web_table: 'lendo tabela', web_extract: 'coletando dados',
   web_download: 'baixando arquivo', web_wait: 'aguardando site', excel_write: 'gerando Excel', excel_read: 'lendo planilha', dashboard_build: 'montando dashboard',
-  powerbi_export: 'dados p/ Power BI', email_send: 'enviando e-mail', email_read: 'lendo e-mails', sql_query: 'consultando banco', vision_ask: 'olhando a tela'};
+  powerbi_export: 'dados p/ Power BI', email_send: 'enviando e-mail', email_read: 'lendo e-mails', sql_query: 'consultando banco'};
 const label = t => LABEL[t] || (t && t.startsWith('sap_') ? 'no SAP' : t && t.startsWith('desktop_') ? 'no programa' : t && t.startsWith('web_') ? 'no site' : t);
 
 function drawChar(g, c, t) {
@@ -328,9 +328,7 @@ function snapAll() { for (const c of chars.values()) { const s = c.seat; c.actio
 
 /* ============================== DADOS / EVENTOS ============================== */
 function syncBots(list) {
-  const assistant = {id: 'assistente', name: 'Assistente IA', team: '—', role: 'worker', color: '#ffffff', status: 'active', activity: ASSIST, stats: {}, mine: true,
-    description: 'Atende o chat e executa suas tarefas.'};
-  const all = [...list, assistant];
+  const all = list;
   const sig = JSON.stringify(list.map(b => [b.id, b.team, b.role, b.status === 'draft']));
   if (sig !== layoutSig) { layoutSig = sig; buildLayout(list);
     for (const c of chars.values()) { c.actions = []; if (!walkable(c.tx, c.ty) && !(c.seat && c.seat.x === c.tx && c.seat.y === c.ty)) { const d = L.lobby.door; c.x = d.x * T; c.y = d.y * T; c.tx = d.x; c.ty = d.y; } } }
@@ -338,7 +336,7 @@ function syncBots(list) {
   for (const id of [...chars.keys()]) if (!ids.has(id)) chars.delete(id);
   for (const b of all) {
     if (chars.has(b.id)) { chars.get(b.id).upd(b); continue; }
-    const d = L.lobby.door, first = !cursorStarted, s = b.id === 'assistente' ? L.seats.assistente : (b.status === 'draft' ? L.spots['draft:' + b.id] : L.seats[b.id]);
+    const d = L.lobby.door, first = !cursorStarted, s = b.status === 'draft' ? L.spots['draft:' + b.id] : L.seats[b.id];
     const c = first && s ? new Char(b, s.x, s.y) : new Char(b, d.x, d.y);
     if (!first) c.say('Olá! 👋', 3000);
     chars.set(b.id, c);
@@ -353,7 +351,7 @@ function syncBots(list) {
 let cursorStarted = false;
 function renderTeam() {
   const groups = {};
-  for (const c of chars.values()) (groups[c.id === 'assistente' ? '★ Atendimento' : c.info.status === 'draft' ? '◇ Em treinamento' : c.info.team] ||= []).push(c);
+  for (const c of chars.values()) (groups[c.info.status === 'draft' ? '◇ Em treinamento' : c.info.team] ||= []).push(c);
   const order = Object.keys(groups).sort((a, b) => (a[0] === '★' ? -2 : a[0] === '◇' ? 2 : 0) - (b[0] === '★' ? -2 : b[0] === '◇' ? 2 : 0) || a.localeCompare(b));
   $('team').innerHTML = order.map(g => { const cs = groups[g].sort((a, b) => (b.role === 'boss') - (a.role === 'boss') || a.name.localeCompare(b.name));
     const busy = cs.filter(c => state(c) === 'running').length;
@@ -379,7 +377,7 @@ function onEvent(e) {
       if (!c) break;
       if (e.ok) { c.say('✔ pronto!', 2500, '#5fd38d'); feed(`✅ ${n} concluiu a tarefa`);
         const boss = [...chars.values()].find(b => b.role === 'boss' && b.info.team === c.info.team && b !== c);
-        if (boss && c.id !== 'assistente') c.wait(800).go(L.spots[boss.id]).then(() => { c.say('📄 entregue'); setTimeout(() => boss.say('👍 valeu', 1500), 900); }).wait(2000).go(c.seat);
+        if (boss) c.wait(800).go(L.spots[boss.id]).then(() => { c.say('📄 entregue'); setTimeout(() => boss.say('👍 valeu', 1500), 900); }).wait(2000).go(c.seat);
       } else { c.errUntil = now() + 9000; c.say('✖ erro', 9000, '#ff6b6b'); feed(`❌ ${n} teve um erro ${esc(e.text || '')}`); }
       break;
     case 'handoff': { const tg = chars.get(e.target); if (c && tg && c.actions.length < 12) { c.go(L.spots[tg.id]).then(() => { c.say('📦 passando dados'); tg.say('recebido!', 1800); }).wait(1800).go(c.seat); }
@@ -396,7 +394,7 @@ async function poll() {
     const r = await fetch('/api/office?since=' + cursor);
     if (r.status === 401) { $('msg').style.display = 'block'; $('msg').textContent = 'Faça login na tela principal do EmanusIA.'; return setTimeout(poll, 4000); }
     const d = await r.json(); $('msg').style.display = 'none';
-    ASSIST = d.assistant; BOTS = d.bots; $('company').textContent = d.company; $('nr').textContent = d.runs_today;
+    BOTS = d.bots; $('company').textContent = d.company; $('nr').textContent = d.runs_today;
     syncBots(d.bots);
     if (cursorStarted) d.events.forEach(onEvent);
     cursor = d.cursor; cursorStarted = true;
@@ -509,7 +507,7 @@ function showInfo(id) {
   ${s.runs != null ? `<div class="bar"><i style="width:${rate ?? 0}%"></i></div><div class="meta">${rate == null ? 'sem execuções ainda' : rate + '% de sucesso'}</div>
   <div class="kv"><span>Execuções</span><b>${s.runs}</b><span>Concluídas</span><b>${s.ok}</b><span>Com erro</span><b>${s.errors}</b>
   <span>Última</span><b>${esc(s.last_run || '—')}</b><span>Situação</span><b>${esc(STATUS[i.status] || '')}</b></div>` : ''}
-  <div class="row">${id !== 'assistente' && i.can_run ? `<button class="go" onclick="runBot('${esc(id)}')" ${i.activity !== 'idle' ? 'disabled' : ''}>▶ Executar</button>` : ''}
+  <div class="row">${i.can_run ? `<button class="go" onclick="runBot('${esc(id)}')" ${i.activity !== 'idle' ? 'disabled' : ''}>▶ Executar</button>` : ''}
   <button onclick="SEL=null;document.getElementById('info').style.display='none';renderTeam()">Fechar</button></div>`;
 }
 async function runBot(id) {

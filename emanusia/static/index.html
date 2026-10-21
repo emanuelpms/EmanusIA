@@ -22,9 +22,6 @@ textarea{font-family:ui-monospace,Consolas,monospace;font-size:13px}label{displa
 table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:8px;border-bottom:1px solid var(--line);font-size:14px}
 .tag{font-size:12px;padding:2px 8px;border-radius:99px;background:var(--line)}.tag.done{background:var(--ok);color:#00201a}
 .tag.error{background:var(--bad);color:#fff}.tag.running,.tag.queued{background:var(--acc);color:#fff}.tag.waiting_approval{background:var(--warn);color:#2b1c00}
-#chat{display:flex;flex-direction:column;height:calc(100vh - 48px)}#msgs{flex:1;overflow:auto;padding-bottom:10px}
-.m{max-width:80%;padding:10px 14px;border-radius:14px;margin:8px 0;white-space:pre-wrap;word-break:break-word}
-.m.u{background:var(--acc);color:#fff;margin-left:auto}.m.a{background:var(--card);border:1px solid var(--line)}
 .chip{display:inline-block;font-size:12px;background:var(--line);border-radius:8px;padding:1px 8px;margin:2px 3px 2px 0}
 .modal{position:fixed;inset:0;background:#0008;display:none;align-items:center;justify-content:center;z-index:9}.modal.show{display:flex}
 .modal>div{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px;width:min(560px,92vw);max-height:90vh;overflow:auto}
@@ -61,8 +58,8 @@ async function api(path, method='GET', body) {
   return j;
 }
 const toast = m => alert(m);
-let ME = null, TAB = 'office', HISTORY = [], ACTIVE = null;
-const TABS = [['office','🏢 Escritório'],['chat','💬 Chat'],['bots','🤖 Bots'],['learn','💡 Aprendizado'],['creds','🔑 Acessos'],['flows','⚙️ Automações'],['jobs','📋 Tarefas'],['sched','⏰ Agendamentos'],['files','📁 Arquivos'],['admin','👥 Admin'],['cfg','🔧 Ajustes']];
+let ME = null, TAB = new URLSearchParams(location.search).get('tab') || 'office', ACTIVE = null;
+const TABS = [['office','🏢 Escritório'],['bots','🤖 Bots'],['creds','🔑 Acessos'],['flows','⚙️ Automações'],['jobs','📋 Tarefas'],['sched','⏰ Agendamentos'],['files','📁 Arquivos'],['admin','👥 Admin'],['cfg','🔧 Ajustes']];
 
 function modal(html) { $('#mbody').innerHTML = html; $('#modal').classList.add('show'); }
 function closeModal() { $('#modal').classList.remove('show'); $('#mbody').style.width = ''; }
@@ -95,13 +92,15 @@ async function boot() {
     + `<div class="sp"></div><div class="who">${esc(u.name)} · ${esc(u.role)}</div>`
     + (me.auth_enabled ? '<button onclick="logout()">Sair</button>' : '');
   go(TAB);
+  const open = new URLSearchParams(location.search).get('bot');
+  if (open) { history.replaceState(null, '', '/'); openBot(open).catch(e => toast(e.message)); }
 }
 async function logout() { await api('/api/logout','POST'); location.reload(); }
 function go(t) {
   TAB = t;
   document.querySelectorAll('nav button[data-t]').forEach(b => b.classList.toggle('on', b.dataset.t === t));
   document.querySelector('main').classList.toggle('full', t === 'office');
-  ({creds: viewCreds, office: viewOffice, bots: viewBots, learn: viewLearn, chat: viewChat, flows: viewFlows, jobs: viewJobs, sched: viewSched, files: viewFiles, admin: viewAdmin, cfg: viewCfg})[t]();
+  (({creds: viewCreds, office: viewOffice, bots: viewBots, flows: viewFlows, jobs: viewJobs, sched: viewSched, files: viewFiles, admin: viewAdmin, cfg: viewCfg})[t] || viewOffice)();
 }
 const readonly = () => ME.user.role === 'viewer';
 
@@ -126,41 +125,6 @@ function askApproval(j) {
   <button class="b bad big" onclick="answer('${j.id}',false)">✋ Não</button></div>`);
 }
 async function answer(id, ok) { closeModal(); approvalShown = null; await api(`/api/jobs/${id}/approve`, 'POST', {ok}); }
-
-/* ---------- Chat ---------- */
-function viewChat() {
-  $('#main').innerHTML = `<div id="chat"><div id="aiwarn"></div><div id="msgs"></div>
-  <div class="row"><textarea id="inp" rows="2" placeholder="Peça uma tarefa: ex. 'Leia vendas.xlsx e gere um dashboard'" ${readonly()?'disabled':''}></textarea>
-  <button class="b" id="send" onclick="send()" ${readonly()?'disabled':''}>Enviar</button></div></div>`;
-  $('#inp').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
-  HISTORY.forEach(m => bubble(m.role === 'user' ? 'u' : 'a', m.content));
-  if (!HISTORY.length) bubble('a', 'Olá! Sou seu funcionário-robô. Posso fazer tarefas agora (sites, planilhas, dashboards, e-mail, SAP) ou criar um robô para você: é só dizer "crie um robô que...". O que fazemos?');
-  checkAI();
-}
-async function checkAI() {   // avisa na hora se a IA local não está pronta, com o que fazer
-  try { const h = await api('/api/health');
-    $('#aiwarn').innerHTML = h.ok ? (h.message ? `<div class="note warn small">${esc(h.message)}</div>` : '')
-      : `<div class="note bad"><b>A IA ainda não está pronta:</b> ${esc(h.message)} <button class="b sec" onclick="checkAI()">Verificar de novo</button></div>`;
-  } catch (e) {}
-}
-function bubble(cls, text) { const d = document.createElement('div'); d.className = 'm ' + cls; d.textContent = text; $('#msgs').append(d); $('#msgs').scrollTop = 1e9; return d; }
-async function send() {
-  const inp = $('#inp'), task = inp.value.trim(); if (!task) return;
-  inp.value = ''; bubble('u', task); $('#send').disabled = true;
-  const box = bubble('a', '⏳ Trabalhando...');
-  try {
-    const j0 = await api('/api/jobs/agent', 'POST', {task, history: HISTORY});
-    const j = await follow(j0.id, j => {
-      const calls = j.events.filter(e => e.kind === 'tool_call').map(e => '→ ' + e.name).join('  ');
-      box.textContent = (j.status === 'waiting_approval' ? '⚠️ Aguardando sua autorização\n' : '⏳ Trabalhando...\n') + calls;
-    });
-    const ans = typeof j.result === 'string' ? j.result : JSON.stringify(j.result);
-    box.textContent = j.status === 'error' ? '❌ ' + (j.plain_error || ans) : ans;
-    HISTORY.push({role:'user', content: task}, {role:'assistant', content: ans});
-  } catch (e) { box.textContent = '❌ ' + e.message; }
-  if ($('#aiwarn')) checkAI();
-  $('#send').disabled = false;
-}
 
 /* ---------- Automações ---------- */
 async function viewFlows() {
@@ -304,12 +268,15 @@ async function viewBots() {
    ${creds.map(c => `<option value="${esc(c.name)}">🔑 ${esc(c.label || c.name)}</option>`).join('')}</select>
    <button class="b big" onclick="teach()">🎬 Começar a ensinar</button>
    <button class="b sec" onclick="teachSap()">🟦 Ensinar no SAP</button></div>
-   <details style="margin-top:12px"><summary class="mut small">Outras formas de criar (para quem já tem prática)</summary>
+   <details style="margin-top:12px"><summary class="mut small">Para quem já tem prática: escrever o código</summary>
    <div class="row" style="margin-top:8px"><input id="bn" placeholder="Nome" style="flex:1"><input id="bt" placeholder="Time" list="teams" style="flex:1">
    <select id="br" style="flex:0 0 130px"><option value="worker">Funcionário</option><option value="boss">Chefe</option></select></div>
-   <textarea id="bd" rows="2" placeholder="Descreva o que ele faz, para a IA escrever" style="margin-top:6px"></textarea>
-   <div class="row" style="margin-top:6px"><button class="b sec" id="bgen" onclick="genBot()">✨ Descrever para a IA</button><button class="b sec" onclick="newBot()">Escrever o código</button>
-   <select id="bw" style="flex:0 1 240px"><option value="">…ou partir de uma automação</option>${wfs.map(w => `<option>${esc(w.name)}</option>`).join('')}</select></div></details></div>`}
+   <div class="row" style="margin-top:6px"><button class="b sec" onclick="newBot()">Escrever o código</button>
+   <select id="bw" style="flex:0 1 240px"><option value="">…ou partir de uma automação</option>${wfs.map(w => `<option>${esc(w.name)}</option>`).join('')}</select></div></details></div>
+  <div class="hero"><h3>🧩 Montar um robô peça por peça</h3><div class="mut">Escolha as ações prontas — ler PDF, XML de nota, e-mails e planilhas, montar Excel e painéis,
+   mexer em sites, pastas e SAP — e encaixe uma depois da outra, com repetições e decisões. Teste na hora e veja o resultado de cada passo.</div>
+   <div class="row" style="margin-top:10px"><button class="b big" onclick="location.href='/builder'">🧩 Abrir o construtor</button>
+   <span class="mut small">Também dá para editar no construtor qualquer robô já ensinado.</span></div></div>`}
   <div class="grid">${bs.map(b => { const [st, cls] = STATUS[b.status] || [b.status, ''], nx = b.next || {};
     const canRun = !readonly() && b.status !== 'draft' && (b.status === 'active' || b.can_edit);
     return `<div class="card"><div class="row"><span style="width:12px;height:12px;border-radius:3px;background:${esc(b.color)};display:inline-block"></span>
@@ -319,7 +286,8 @@ async function viewBots() {
     <div class="mut small">trabalhou ${b.stats.runs}× · ${b.stats.errors ? b.stats.errors + ' com problema' : 'sem problemas'}</div>
     ${b.can_edit && nx.step !== 'done' ? `<div class="note ${nx.step === 'waiting_review' ? 'warn' : ''}" style="margin-top:8px">${NEXT_ICON[nx.step] || ''} Próximo: <b>${esc(nx.text)}</b></div>` : ''}
     <div class="row" style="margin-top:8px">
-      ${b.can_edit ? `<button class="b" onclick='openBot(${JSON.stringify(b.id)})'>Abrir</button>` : ''}
+      ${b.can_edit ? `<button class="b" onclick='openBot(${JSON.stringify(b.id)})'>Abrir</button>
+        <a class="b sec" href="/builder?bot=${encodeURIComponent(b.id)}" title="Editar no construtor">🧩</a>` : ''}
       <button class="b ${b.can_edit ? 'sec' : ''}" ${canRun ? '' : 'disabled'} onclick='runBot(${JSON.stringify(b.id)})'>▶ Executar</button>
       ${b.can_edit && b.status === 'active' ? `<button class="b sec" onclick='activeBot(${JSON.stringify(b.id)},false)'>Pausar</button>
         <button class="b sec" title="Agendar" onclick='schedFlow(${JSON.stringify(b.id)},"bot")'>⏰</button>` : ''}
@@ -372,7 +340,8 @@ async function openBot(id) {
   <div class="row" style="margin-top:16px">${reviewing ? `<button class="b big" onclick="decide(true)">✅ Aprovar e colocar para trabalhar</button>
     <button class="b bad" onclick="decide(false)">Pedir ajustes</button>` : b.can_edit ? nextButton(nx) : ''}
     ${b.can_edit && b.status !== 'draft' ? `<button class="b sec" onclick='runBot(${JSON.stringify(b.id)})'>▶ Executar agora</button>` : ''}</div>
-  ${b.can_edit ? `<p class="small" style="margin-top:14px"><a href="#" onclick='editBot(${JSON.stringify(b.id)});return false' style="color:var(--mut)">Modo avançado (código)</a> ·
+  ${b.can_edit ? `<p class="small" style="margin-top:14px"><a href="/builder?bot=${encodeURIComponent(b.id)}" style="color:var(--acc)">🧩 Editar no construtor</a> ·
+    <a href="#" onclick='editBot(${JSON.stringify(b.id)});return false' style="color:var(--mut)">Modo avançado (código)</a> ·
     <a href="#" onclick='delBot(${JSON.stringify(b.id)});return false' style="color:var(--bad)">Demitir robô</a></p>` : ''}`);
   $('#mbody').style.width = 'min(760px,94vw)';
 }
@@ -511,17 +480,6 @@ async function decide(ok) {
 async function goLive() { try { await api(`/api/bots/${BOT.b.id}/active`, 'POST', {active: true}); toast('O robô começou a trabalhar! 🎉'); closeModal(); viewBots(); } catch (e) { toast(e.message); } }
 
 function newBot() { botEditor(null, 'params: {}\nsteps:\n  - log: "olá, sou um bot novo"\n'); }
-async function genBot() {
-  const d = $('#bd').value.trim(); if (!$('#bn').value.trim()) return toast('Dê um nome ao bot.');
-  $('#bgen').disabled = true; $('#bgen').textContent = '⏳ Escrevendo o código...';
-  try {
-    const j0 = await api('/api/bots/generate', 'POST', {description: d});
-    const j = await follow(j0.id, () => {});
-    if (j.status === 'error') throw new Error(j.plain_error || j.result);
-    botEditor(null, j.result.yaml, j.result.validation, `Gerado em ${j.result.attempts} tentativa(s).`, 'ia');
-  } catch (e) { toast(e.message); }
-  if ($('#bgen')) { $('#bgen').disabled = false; $('#bgen').textContent = '✨ Gerar código com IA'; }
-}
 async function editBot(id) { const b = await api('/api/bots/' + id); botEditor(b, b.yaml, b.validation); }
 function report(r) {
   if (!r) return '';
@@ -532,7 +490,7 @@ function report(r) {
 }
 function botEditor(b, yaml, rep, note = '', origin = 'manual') {
   const n = b ? b.name : ($('#bn') ? $('#bn').value : ''), t = b ? b.team : ($('#bt') ? $('#bt').value : ''), r = b ? b.role : ($('#br') ? $('#br').value : 'worker');
-  const d = b ? b.description : ($('#bd') ? $('#bd').value : '');
+  const d = b ? b.description : '';
   modal(`<h2>${b ? 'Código de ' + esc(b.name) : 'Novo bot'}</h2>${note ? `<p class="mut small">${esc(note)}</p>` : ''}
   <div class="row"><input id="en" value="${esc(n)}" placeholder="Nome" ${b ? 'disabled' : ''} style="flex:2"><input id="et" value="${esc(t)}" placeholder="Time" style="flex:1">
   <select id="er" style="flex:0 0 130px"><option value="worker" ${r === 'worker' ? 'selected' : ''}>Funcionário</option><option value="boss" ${r === 'boss' ? 'selected' : ''}>Chefe</option></select></div>
@@ -578,7 +536,7 @@ async function viewCreds() {
   $('#main').innerHTML = `<h2>Meus acessos</h2>
   <div class="card small mut">Cadastre aqui o <b>seu</b> login de cada sistema. Os bots usam só o <b>nome</b> do acesso
   (ex.: <code>web_login: portal-fornecedor</code>) e, ao rodar, pegam o login de quem está executando — cada pessoa da equipe usa o próprio usuário.
-  As senhas ficam criptografadas neste computador e nunca aparecem na tela, nos logs nem para a IA.</div>
+  As senhas ficam criptografadas neste computador e nunca aparecem na tela nem nos registros.</div>
   ${readonly() ? '' : '<p><button class="b" onclick="editCred()">+ Novo acesso</button></p>'}
   <div class="card"><table><tr><th>Nome</th><th>Sistema</th><th>Usuário</th><th>Endereço</th><th>Atualizado</th><th></th></tr>
   ${cs.map(c => `<tr><td><code>${esc(c.name)}</code>${c.shared ? ' <span class="tag">compartilhado</span>' : ''}<div class="small mut">${esc(c.label)}</div></td>
@@ -614,44 +572,15 @@ async function saveCred(editing) {
 }
 async function delCred(n, shared) { if (confirm('Remover o acesso ' + n + '?')) { await api(`/api/credentials/${encodeURIComponent(n)}?shared=${shared}`, 'DELETE'); viewCreds(); } }
 
-/* ---------- Aprendizado ---------- */
-async function viewLearn() {
-  const [sg, st, c] = await Promise.all([api('/api/suggestions'), api('/api/learning'), api('/api/config')]);
-  $('#main').innerHTML = `<h2>Aprendizado</h2>
-  <div class="card"><b>Como o robô aprende</b><p class="small mut">Cada tarefa que você resolve no Chat vira experiência: as parecidas ajudam as próximas respostas,
-  e quando a mesma rotina se repete ${esc(c.settings.suggest_min_repeats)}× o sistema propõe um bot pronto — os valores que mudam viram parâmetros.</p>
-  <div class="row small"><span>Tarefas registradas: <b>${st.tasks}</b></span><span>Bem-sucedidas: <b>${st.success}</b></span>
-  <span>Auto-criação de bots: <b>${c.settings.auto_create_bots ? 'ligada (cria rascunhos)' : 'desligada'}</b> <span class="mut">(Ajustes)</span></span></div></div>
-  <h3>💡 Bots sugeridos</h3>
-  <div class="grid">${sg.map(s => `<div class="card"><b>${esc(s.name)}</b> <span class="tag">${s.count}× repetido</span>
-    <div class="small" style="margin:6px 0">"${esc(s.title)}"</div><div class="mut small">${s.tools.map(esc).join(' → ')}</div>
-    <ol class="small" style="padding-left:18px;margin:8px 0">${s.steps.map(t => `<li>${esc(t)}</li>`).join('')}</ol>
-    ${s.params.length ? `<div class="small mut">Muda a cada vez: ${s.params.map(esc).join(', ')}</div>` : ''}
-    <details><summary class="small mut">ver código</summary><pre>${esc(s.yaml)}</pre></details>
-    <div class="row"><input id="sn-${s.id}" value="${esc(s.name)}" style="flex:2"><input id="st-${s.id}" value="Geral" style="flex:1"></div>
-    <div class="row" style="margin-top:8px"><button class="b" ${readonly() ? 'disabled' : ''} onclick="acceptSug('${s.id}')">Contratar este bot</button>
-    <button class="b sec" ${readonly() ? 'disabled' : ''} onclick="dismissSug('${s.id}')">Dispensar</button></div></div>`).join('')
-    || '<p class="mut">Nenhuma rotina repetida ainda. Use o Chat no dia a dia: o robô observa e sugere bots aqui.</p>'}</div>
-  <h3>Últimas tarefas aprendidas</h3><div class="card"><table>${st.recent.map(r => `<tr><td class="small">${esc(r.ts)}</td><td>${r.success ? '✔' : '✖'}</td>
-  <td>${esc(r.task)}</td><td class="small mut">${r.tools.map(esc).join(' → ')}</td></tr>`).join('') || '<tr><td class="mut">—</td></tr>'}</table></div>`;
-}
-async function acceptSug(id) {
-  try { const b = await api(`/api/suggestions/${id}/accept`, 'POST', {name: $('#sn-' + id).value, team: $('#st-' + id).value});
-    toast(`Bot "${b.name}" contratado (${b.status === 'validated' ? 'validado — ative na aba Bots' : 'rascunho: revise o código'}).`); viewLearn(); } catch (e) { toast(e.message); }
-}
-async function dismissSug(id) { await api(`/api/suggestions/${id}/dismiss`, 'POST'); viewLearn(); }
-
 /* ---------- Ajustes ---------- */
 async function viewCfg() {
   const [c, tools] = await Promise.all([api('/api/config'), api('/api/tools')]);
   const S = c.settings, adm = ME.user.role === 'admin', dis = adm ? '' : 'disabled';
-  const opts = (sel) => [...new Set([sel, ...c.installed_models])].map(m => `<option ${m === sel ? 'selected' : ''}>${esc(m)}</option>`).join('');
   $('#main').innerHTML = `<h2>Ajustes</h2>
   <div class="card"><b>Empresa</b><label>Nome (aparece no escritório)</label><input id="cc" value="${esc(S.company_name)}" ${dis}></div>
-  <div class="card"><b>Modelos (Ollama)</b>
-  ${c.installed_models.length ? '' : '<p class="small" style="color:var(--warn)">Ollama não respondeu. Instale em ollama.com e rode: <code>ollama pull qwen2.5:7b</code> e <code>ollama pull qwen2.5vl:3b</code></p>'}
-  <label>Modelo de raciocínio/ferramentas</label><select id="cm" ${dis}>${opts(S.model)}</select>
-  <label>Modelo de visão</label><select id="cv" ${dis}>${opts(S.vision_model)}</select></div>
+  <div class="card"><b>📂 Pastas liberadas</b><p class="small mut">Os robôs sempre podem usar a pasta de trabalho (<code>${esc(c.workspace)}</code>).
+  Libere aqui outras pastas, uma por linha (ex.: <code>C:\Notas Fiscais</code> ou <code>\\servidor\financeiro</code>). Nenhuma outra pasta do computador é acessada.</p>
+  <textarea id="af" rows="3" ${dis} placeholder="C:\Notas Fiscais">${esc((S.allowed_folders || []).join('\n'))}</textarea></div>
   <div class="card"><b>E-mail</b>
   <label>Provedor</label><select id="ep" ${dis} onchange="document.getElementById('smtp').style.display=this.value==='smtp'?'block':'none'">
     <option value="outlook" ${S.email_provider === 'outlook' ? 'selected' : ''}>Outlook instalado (padrão — usa a conta já logada no Windows)</option>
@@ -664,10 +593,7 @@ async function viewCfg() {
     <div class="row"><div style="flex:1"><label>Servidor IMAP (leitura)</label><input id="ih" value="${esc(S.imap_host)}" placeholder="outlook.office365.com" ${dis}></div>
     <div style="flex:1"><label>Usuário IMAP (vazio = mesmo do SMTP)</label><input id="iu" value="${esc(S.imap_user)}" ${dis}></div></div>
     <p class="mut small">🔒 Senhas não ficam salvas no sistema: defina as variáveis de ambiente <code>EMAIL_SMTP_PASS</code> e <code>EMAIL_IMAP_PASS</code> no Windows.</p></div></div>
-  <div class="card"><b>Aprendizado</b>
-  <label><input type="checkbox" id="ac" style="width:auto" ${S.auto_create_bots ? 'checked' : ''} ${dis}> Criar bots automaticamente quando uma rotina se repetir (entram como rascunho validado; um humano ativa)</label>
-  <label>Repetições para sugerir um bot</label><input id="mr" type="number" min="2" value="${esc(S.suggest_min_repeats)}" ${dis} style="max-width:120px"></div>
-  <div class="card"><b>🩺 Diagnóstico</b><p class="small mut">Confere Ollama, modelos, placa de vídeo, navegador dos robôs, cofre e integrações do Windows.</p>
+  <div class="card"><b>🩺 Diagnóstico</b><p class="small mut">Confere Python, pacotes, navegador dos robôs, cofre e integrações do Windows (Outlook, Excel, SAP).</p>
   <button class="b sec" ${dis} onclick="runDoctor()">Rodar diagnóstico</button><div id="doc"></div></div>
   <p><button class="b" ${dis} onclick="saveCfg()">Salvar ajustes</button> <span class="mut small">${adm ? '' : 'Somente admin altera ajustes.'}</span></p>
   <div class="card"><b>Ferramentas disponíveis</b> <span class="mut small">(⚠️ = pede autorização)</span>
@@ -682,9 +608,9 @@ async function runDoctor() {
   } catch (e) { $('#doc').innerHTML = `<p style="color:var(--bad)">${esc(e.message)}</p>`; }
 }
 async function saveCfg() {
-  try { await api('/api/settings', 'POST', {company_name: $('#cc').value, model: $('#cm').value, vision_model: $('#cv').value, email_provider: $('#ep').value,
+  try { await api('/api/settings', 'POST', {company_name: $('#cc').value, email_provider: $('#ep').value,
       smtp_host: $('#sh2').value, smtp_port: +$('#sp').value || 587, smtp_user: $('#su2').value, smtp_from: $('#sf').value, imap_host: $('#ih').value,
-      imap_user: $('#iu').value, auto_create_bots: $('#ac').checked, suggest_min_repeats: +$('#mr').value || 3});
+      imap_user: $('#iu').value, allowed_folders: $('#af').value.split('\n').map(x => x.trim()).filter(Boolean)});
     toast('Salvo.'); } catch (e) { toast(e.message); }
 }
 

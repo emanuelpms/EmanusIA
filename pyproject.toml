@@ -1,11 +1,11 @@
 [project]
 name = "emanusia"
 version = "0.1.0"
-description = "Funcionário-robô local: agente de IA (Ollama) para automação web, Excel, Power BI, dashboards e SAP"
+description = "Funcionários-robô locais sem código: PDF, XML/NF-e, e-mail, Excel, dashboards, web, pastas e SAP"
 requires-python = ">=3.10"
 dependencies = [
   "httpx>=0.27", "pydantic>=2", "pyyaml", "openpyxl", "pandas", "plotly",
-  "playwright", "fastapi", "uvicorn", "cryptography", "lxml", "pdfplumber",
+  "playwright", "fastapi", "uvicorn", "cryptography", "lxml", "pdfplumber", "pypdf",
 ]
 
 [project.optional-dependencies]

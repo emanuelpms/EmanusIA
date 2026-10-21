@@ -37,7 +37,7 @@ class Bot:
     validation: dict = field(default_factory=dict)
     stats: dict = field(default_factory=lambda: {"runs": 0, "ok": 0, "errors": 0,
                                                  "last_run": None, "last_ok": None})
-    origin: str = "manual"  # manual | ia | sugestao | gravacao
+    origin: str = "manual"  # manual | construtor | gravacao | sap
     rehearsal: dict = field(default_factory=dict)   # {ok, hash, at, steps:[{path, text, ok, error, shot}]}
     review: dict = field(default_factory=dict)      # {status: pending|approved|changes, hash, by, at, note}
     created: float = field(default_factory=time.time)
@@ -166,7 +166,7 @@ def validate_bot(bot_id: str, user: auth.User) -> dict:
     return rep
 
 
-SCREEN_GROUPS = {"web", "desktop", "sap", "vision", "access"}
+SCREEN_GROUPS = {"web", "desktop", "sap", "access"}
 
 
 def needs_rehearsal(code: dict) -> bool:

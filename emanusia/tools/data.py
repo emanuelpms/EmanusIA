@@ -4,7 +4,7 @@ criar colunas calculadas.
 
 `source` pode ser um arquivo do workspace (.xlsx/.xls/.csv/.json) ou linhas vindas de outro passo
 ([[cabeçalho...], [linha...]] ou [{coluna: valor}]). `output` (opcional) salva o resultado em
-.xlsx/.csv. O retorno traz no máximo `limit` linhas (para não estourar o contexto do LLM) + o total."""
+.xlsx/.csv. O retorno traz no máximo `limit` linhas (para a tela não pesar) + o total."""
 import glob
 import math
 
@@ -23,6 +23,8 @@ AGGS = {"sum": "sum", "soma": "sum", "mean": "mean", "media": "mean", "média": 
 def load(source, sheet: str | None = None) -> pd.DataFrame:
     if isinstance(source, pd.DataFrame):
         return source.copy()
+    if isinstance(source, dict) and isinstance(source.get("rows"), list):  # resultado de outro passo
+        source = source["rows"]
     if isinstance(source, list):
         if not source:
             return pd.DataFrame()
@@ -271,19 +273,18 @@ def data_merge(left, right, on=None, left_on=None, right_on=None, how="left", le
     return result(df, output, 50, **extra)
 
 
-@tool("data_combine", "Consolida várias planilhas/CSVs (padrão glob no workspace, ex.: 'filiais/*.xlsx') "
+@tool("data_combine", "Consolida várias planilhas/CSVs (padrão de arquivos, ex.: 'filiais/*.xlsx') "
       "em uma só tabela, com coluna da origem.",
       {"pattern": {"type": "string"}, "sheet": {"type": "string"}, "output": {"type": "string"},
        "source_column": {"type": "string"}}, ("pattern",))
 def data_combine(pattern: str, sheet=None, output=None, source_column="arquivo_origem"):
-    root = config.workspace()
     files = sorted(p for p in glob.glob(str(config.safe_path(pattern)), recursive=True)
                    if p.lower().endswith((".xlsx", ".xls", ".xlsm", ".csv")))
     if not files:
         raise FileNotFoundError(f"Nenhuma planilha em '{pattern}'")
     frames = []
     for f in files:
-        rel = config.safe_path(f).relative_to(root).as_posix()
+        rel = config.display_path(config.safe_path(f))
         d = load(rel, sheet)
         if source_column:
             d[source_column] = rel

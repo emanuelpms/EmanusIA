@@ -98,8 +98,8 @@ def excel_write(path: str, sheets: dict, formats: dict | None = None, totals: di
     wb.remove(wb.active)
     data_rows = {}
     for name, rws in sheets.items():
-        if isinstance(rws, str):  # arquivo do workspace
-            rws = to_rows(load(rws), None)
+        if not (isinstance(rws, list) and (not rws or isinstance(rws[0], list | tuple))):
+            rws = to_rows(load(rws), None)  # arquivo, resultado de outro passo ou lista de {coluna: valor}
         ws = wb.create_sheet(str(name)[:31])
         _fill_sheet(ws, rws, as_table and not (totals or {}).get(name))
         data_rows[ws.title] = ws.max_row
@@ -134,6 +134,40 @@ def excel_write(path: str, sheets: dict, formats: dict | None = None, totals: di
         ws.add_chart(_chart(ws, spec, data_rows[ws.title]), anchor)
     wb.save(config.safe_path(path))
     return {"path": path, "sheets": list(wb.sheetnames)}
+
+
+@tool("excel_save", "Monta uma planilha a partir de dados (de outro passo ou de um arquivo): uma aba, com "
+      "formato por coluna (money|int|decimal|percent|date), linha de TOTAL, tabela do Excel e um gráfico opcional. "
+      "append=true acrescenta as linhas no fim de uma planilha que já existe.",
+      {"path": {"type": "string"}, "data": {}, "sheet": {"type": "string"}, "formats": {"type": "object"},
+       "totals": {"type": "array"}, "as_table": {"type": "boolean"}, "chart_type": {"type": "string"},
+       "chart_x": {"type": "string"}, "chart_y": {"type": "array"}, "chart_title": {"type": "string"},
+       "append": {"type": "boolean"}}, ("path", "data"))
+def excel_save(path: str, data, sheet: str = "Dados", formats: dict | None = None, totals: list | None = None,
+               as_table: bool = True, chart_type: str = "", chart_x: str = "", chart_y: list | None = None,
+               chart_title: str = "", append: bool = False):
+    from .data import load, rows as to_rows
+    table = data if isinstance(data, list) and data and isinstance(data[0], list | tuple) else to_rows(load(data), None)
+    sheet = (sheet or "Dados")[:31]
+    p = config.safe_path(path)
+    if append and p.exists():
+        wb = load_workbook(p)
+        if sheet in wb.sheetnames:
+            ws = wb[sheet]
+            head = [str(c.value) for c in ws[1]]
+            new_head = [str(c) for c in table[0]]
+            idx = [new_head.index(h) if h in new_head else None for h in head]
+            for r in table[1:]:  # casa as colunas pelo nome
+                ws.append([r[i] if i is not None and i < len(r) else None for i in idx])
+            wb.save(p)
+            return {"path": path, "added": len(table) - 1, "rows": ws.max_row - 1}
+    if isinstance(chart_y, str):
+        chart_y = [chart_y]
+    chart = {"sheet": sheet, "type": chart_type, "category_col": chart_x or 1, "value_cols": chart_y or [2],
+             "title": chart_title} if chart_type else None
+    res = excel_write(path, {sheet: table}, {sheet: formats} if formats else None,
+                      {sheet: totals} if totals else None, None, as_table, None, chart)
+    return {**res, "rows": len(table) - 1}
 
 
 @tool("excel_dashboard",
