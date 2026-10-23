@@ -1,5 +1,6 @@
 """Excel profissional (openpyxl): relatórios formatados, dashboards nativos do Excel com fórmulas vivas,
 edição de planilhas existentes e (no Windows) atualização de consultas/tabelas dinâmicas e macros."""
+import logging
 import sys
 
 from openpyxl import Workbook, load_workbook
@@ -22,6 +23,18 @@ PALETTE = ["2F6DB5", "22A38A", "F2A33A", "E0605E", "8A6FD1", "3BA9D9", "D96BA8",
 THIN = Side(style="thin", color="D6DEEA")
 
 
+def _save(wb, p):
+    """Salva e grava junto os valores das fórmulas (calculados pelo motor do sistema, sem o Excel):
+    a planilha mostra os números em qualquer visualizador e os próximos passos conseguem lê-los."""
+    wb.save(p)
+    if p.suffix.lower() in (".xlsx", ".xlsm"):
+        try:
+            from ..xlformula import fill_cached_values
+            fill_cached_values(p)
+        except Exception:  # nunca derruba o robô: o Excel recalcula ao abrir de qualquer jeito
+            logging.getLogger("emanusia").warning("não consegui pré-calcular as fórmulas de %s", p, exc_info=True)
+
+
 def _fmt(name: str) -> str:
     return FORMATS.get(str(name).lower(), name)  # aceita também formato Excel direto
 
@@ -36,8 +49,15 @@ def _col_index(ws, col) -> int:
 
 
 def _fill_sheet(ws, rows: list[list], as_table: bool = False):
+    import datetime as dt
     for r in rows:
         ws.append(list(r))
+    for row in ws.iter_rows(min_row=2):  # datas aparecem como data brasileira
+        for c in row:
+            if isinstance(c.value, dt.datetime):
+                c.number_format = "dd/mm/yyyy hh:mm" if (c.value.hour or c.value.minute) else "dd/mm/yyyy"
+            elif isinstance(c.value, dt.date):
+                c.number_format = "dd/mm/yyyy"
     if ws.max_row == 0:
         return
     for c in ws[1]:
@@ -99,7 +119,7 @@ def excel_write(path: str, sheets: dict, formats: dict | None = None, totals: di
     data_rows = {}
     for name, rws in sheets.items():
         if not (isinstance(rws, list) and (not rws or isinstance(rws[0], list | tuple))):
-            rws = to_rows(load(rws), None)  # arquivo, resultado de outro passo ou lista de {coluna: valor}
+            rws = to_rows(load(rws), None, native=True)  # arquivo, resultado de outro passo ou lista de {coluna: valor}
         ws = wb.create_sheet(str(name)[:31])
         _fill_sheet(ws, rws, as_table and not (totals or {}).get(name))
         data_rows[ws.title] = ws.max_row
@@ -132,7 +152,7 @@ def excel_write(path: str, sheets: dict, formats: dict | None = None, totals: di
         ws = wb[str(spec.get("sheet") or list(sheets)[0])[:31]]
         anchor = spec.get("anchor") or f"{get_column_letter(ws.max_column + 2)}{2 + i * 18}"
         ws.add_chart(_chart(ws, spec, data_rows[ws.title]), anchor)
-    wb.save(config.safe_path(path))
+    _save(wb, config.safe_path(path))
     return {"path": path, "sheets": list(wb.sheetnames)}
 
 
@@ -147,7 +167,7 @@ def excel_save(path: str, data, sheet: str = "Dados", formats: dict | None = Non
                as_table: bool = True, chart_type: str = "", chart_x: str = "", chart_y: list | None = None,
                chart_title: str = "", append: bool = False):
     from .data import load, rows as to_rows
-    table = data if isinstance(data, list) and data and isinstance(data[0], list | tuple) else to_rows(load(data), None)
+    table = data if isinstance(data, list) and data and isinstance(data[0], list | tuple) else to_rows(load(data), None, native=True)
     sheet = (sheet or "Dados")[:31]
     p = config.safe_path(path)
     if append and p.exists():
@@ -157,16 +177,43 @@ def excel_save(path: str, data, sheet: str = "Dados", formats: dict | None = Non
             head = [str(c.value) for c in ws[1]]
             new_head = [str(c) for c in table[0]]
             idx = [new_head.index(h) if h in new_head else None for h in head]
-            for r in table[1:]:  # casa as colunas pelo nome
-                ws.append([r[i] if i is not None and i < len(r) else None for i in idx])
-            wb.save(p)
-            return {"path": path, "added": len(table) - 1, "rows": ws.max_row - 1}
+            added = [[r[i] if i is not None and i < len(r) else None for i in idx] for r in table[1:]]
+            if set(wb.sheetnames) <= {sheet, "Resumo"}:
+                # planilha montada por esta peça: remonta inteira (dados antigos + novos), assim a linha de
+                # total, o resumo e o gráfico passam a incluir as linhas e categorias novas
+                old = [[c for c in r] for r in ws.iter_rows(min_row=2, values_only=True)]
+                if totals and old and old[-1] and old[-1][0] == "TOTAL":
+                    old = old[:-1]
+                before = len(old)
+                table = [head] + old + added
+                res = excel_save(path, table, sheet, formats, totals, as_table, chart_type, chart_x, chart_y, chart_title)
+                return {**res, "added": len(added), "rows": before + len(added)}
+            for r in added:  # casa as colunas pelo nome
+                ws.append(r)
+            _save(wb, p)
+            return {"path": path, "added": len(added), "rows": ws.max_row - 1}
     if isinstance(chart_y, str):
         chart_y = [chart_y]
-    chart = {"sheet": sheet, "type": chart_type, "category_col": chart_x or 1, "value_cols": chart_y or [2],
-             "title": chart_title} if chart_type else None
-    res = excel_write(path, {sheet: table}, {sheet: formats} if formats else None,
-                      {sheet: totals} if totals else None, None, as_table, None, chart)
+    sheets, fmts = {sheet: table}, {sheet: formats} if formats else {}
+    chart = None
+    if chart_type:
+        head = [str(c) for c in table[0]]
+        xi = head.index(chart_x) if chart_x in head else (int(chart_x) - 1 if str(chart_x).isdigit() else 0)
+        ys = [y for y in (chart_y or [head[1] if len(head) > 1 else head[0]]) if y in head] or [head[min(1, len(head) - 1)]]
+        cats = list(dict.fromkeys(r[xi] for r in table[1:] if xi < len(r) and r[xi] not in (None, "")))
+        if len(cats) < len(table) - 1:  # categoria repetida: o gráfico usa um resumo (SOMASE) por categoria
+            q = "'" + sheet.replace("'", "''") + "'"
+            L = lambda i: get_column_letter(i + 1)  # noqa: E731
+            res_rows = [[head[xi], *ys]] + [[c, *[f"=SUMIF({q}!${L(xi)}:${L(xi)},A{r},{q}!${L(head.index(y))}:${L(head.index(y))})"
+                                                  for y in ys]] for r, c in enumerate(cats, 2)]
+            sheets["Resumo"] = res_rows
+            if formats:
+                fmts["Resumo"] = {y: f for y, f in formats.items() if y in ys}
+            chart = {"sheet": "Resumo", "type": chart_type, "category_col": 1, "value_cols": list(range(2, len(ys) + 2)),
+                     "title": chart_title, "anchor": "E2"}
+        else:
+            chart = {"sheet": sheet, "type": chart_type, "category_col": xi + 1, "value_cols": ys, "title": chart_title}
+    res = excel_write(path, sheets, fmts or None, {sheet: totals} if totals else None, None, as_table, None, chart)
     return {**res, "rows": len(table) - 1}
 
 
@@ -193,7 +240,7 @@ def excel_dashboard(path: str, source, title: str, sheet: str | None = None, sub
     dash = wb.active
     dash.title = "Dashboard"
     data = wb.create_sheet("Dados")
-    _fill_sheet(data, to_rows(df, None), as_table=True)
+    _fill_sheet(data, to_rows(df, None, native=True), as_table=True)
     for col, f in (formats or {}).items():
         ci = _col_index(data, col)
         for (cell,) in data.iter_rows(min_row=2, min_col=ci, max_col=ci):
@@ -211,30 +258,30 @@ def excel_dashboard(path: str, source, title: str, sheet: str | None = None, sub
     dash.merge_cells("B2:P2")
     dash["B2"] = title
     dash["B2"].font = Font(size=22, bold=True, color=NAVY)
-    dash["B3"] = subtitle or f"{len(df)} registros · atualiza ao abrir no Excel"
+    dash["B3"] = subtitle or f"{len(df)} registros · fórmulas que se atualizam quando os dados mudam"
     dash["B3"].font = Font(size=11, color="6B7A90")
     fn = {"sum": "SUM({r})", "mean": "AVERAGE({r})", "count": "COUNTA({r})-1", "max": "MAX({r})",
           "min": "MIN({r})"}
     for k, kp in enumerate(kpis or []):
-        c0 = 2 + (k % 5) * 3
-        r0 = 5 + (k // 5) * 5
+        c0 = 2 + (k % 4) * 4  # cartão de 3 colunas + 1 de respiro (cabe "R$ 1.234.567,89")
+        r0 = 5 + (k // 4) * 5
         col, agg = _col(df, kp["column"]), _agg(kp.get("agg", "sum"))
         if agg in fn:
             val = "=" + fn[agg].format(r=rng(col))
         else:  # distintos: valor calculado agora (não há fórmula simples em todas as versões)
             val = int(df[col].nunique()) if agg == "nunique" else float(df[col].agg(agg))
-        dash.merge_cells(start_row=r0, start_column=c0, end_row=r0, end_column=c0 + 1)
-        dash.merge_cells(start_row=r0 + 1, start_column=c0, end_row=r0 + 2, end_column=c0 + 1)
+        dash.merge_cells(start_row=r0, start_column=c0, end_row=r0, end_column=c0 + 2)
+        dash.merge_cells(start_row=r0 + 1, start_column=c0, end_row=r0 + 2, end_column=c0 + 2)
         lab, v = dash.cell(r0, c0, kp.get("label", col)), dash.cell(r0 + 1, c0, val)
         lab.font, lab.alignment = Font(size=10, bold=True, color="FFFFFF"), Alignment(horizontal="center")
         v.font, v.alignment = Font(size=20, bold=True, color=NAVY), Alignment(horizontal="center", vertical="center")
         v.number_format = _fmt(kp.get("format", "decimal" if agg == "mean" else "int"))
         for rr in range(r0, r0 + 3):
-            for cc in (c0, c0 + 1):
+            for cc in (c0, c0 + 1, c0 + 2):
                 cell = dash.cell(rr, cc)
                 cell.fill = PatternFill("solid", fgColor=PALETTE[k % len(PALETTE)] if rr == r0 else LIGHT)
                 cell.border = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
-    chart_row = 6 + 5 * ((len(kpis or []) + 4) // 5) if kpis else 5
+    chart_row = 6 + 5 * ((len(kpis or []) + 3) // 4) if kpis else 5
     ccol = 1
     fx = {"sum": '=SUMIF({x},{k},{y})', "count": '=COUNTIF({x},{k})', "mean": '=IFERROR(AVERAGEIF({x},{k},{y}),0)',
           "max": '=_xlfn.MAXIFS({y},{x},{k})', "min": '=_xlfn.MINIFS({y},{x},{k})'}
@@ -265,7 +312,7 @@ def excel_dashboard(path: str, source, title: str, sheet: str | None = None, sub
         dash.add_chart(chart, f"{get_column_letter(2 + (i % 2) * 8)}{chart_row + (i // 2) * 17}")
         ccol += 3
     wb.calculation.fullCalcOnLoad = True  # Excel recalcula tudo ao abrir
-    wb.save(config.safe_path(path))
+    _save(wb, config.safe_path(path))
     return {"path": path, "rows": len(df), "kpis": len(kpis or []), "charts": len(charts or []),
             "sheets": wb.sheetnames}
 
@@ -294,7 +341,7 @@ def excel_update(path: str, sheet: str | None = None, cells: dict | None = None,
         ws[ref] = v
     for r in append_rows or []:
         ws.append(list(r))
-    wb.save(p)
+    _save(wb, p)
     return {"path": path, "sheet": ws.title, "rows": ws.max_row}
 
 
@@ -310,6 +357,26 @@ def excel_read(path: str, sheet: str | None = None, max_rows: int = 500):
             return list(csv.reader(f))[:max_rows]
     ws = load_workbook(p, data_only=True)[sheet] if sheet else load_workbook(p, data_only=True).active
     return [list(r) for r in ws.iter_rows(values_only=True, max_row=max_rows)]
+
+
+@tool("excel_recalc", "Recalcula as fórmulas de uma planilha SEM abrir o Excel (SOMA, SOMASE, CONT.SE, MÉDIASE, "
+      "SE, SEERRO, PROCV, ARRED...) e grava os resultados no arquivo. values_only=true salva uma cópia só com "
+      "os valores (sem fórmulas) em `output`. Mostra as células com erro e as funções que o sistema não conhece.",
+      {"path": {"type": "string"}, "values_only": {"type": "boolean"}, "output": {"type": "string"}}, ("path",))
+def excel_recalc(path: str, values_only: bool = False, output: str = ""):
+    from ..xlformula import XLError, evaluate, fill_cached_values
+    p = config.safe_path(path, mkdir=False)
+    vals = evaluate(p)
+    problems = [f"{sh}!{get_column_letter(c)}{r}: {v.code}" for sh, cells in vals.items()
+                for (r, c), v in cells.items() if isinstance(v, XLError)]
+    n = fill_cached_values(p)
+    res = {"path": path, "formulas": n, "problems": problems[:20]}
+    if values_only:
+        out = config.safe_path(output or str(p.with_name(p.stem + "-valores" + p.suffix)))
+        wb = load_workbook(p, data_only=True)
+        wb.save(out)
+        res["output"] = config.display_path(out)
+    return res
 
 
 @tool("excel_refresh", "Abre no Excel (Windows) e atualiza tudo: consultas Power Query, conexões e "

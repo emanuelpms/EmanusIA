@@ -329,16 +329,56 @@ def files(u: auth.User = Depends(current_user)):
 
 
 @app.get("/files/{path:path}")
-def file_get(path: str, u: auth.User = Depends(current_user)):
+def file_get(path: str, download: bool = False, u: auth.User = Depends(current_user)):
     try:
-        p = config.safe_path(path)
+        p = config.safe_path(path, mkdir=False)
     except PermissionError:
         raise HTTPException(403)
     if not p.is_file():
         raise HTTPException(404)
-    # sandbox: HTML gerado por workflows roda com origem opaca (sem acesso à API/cookies)
-    return FileResponse(p, headers={"Content-Security-Policy": "sandbox allow-scripts",
-                                    "X-Content-Type-Options": "nosniff"})
+    headers = {"X-Content-Type-Options": "nosniff"}
+    if p.suffix.lower() in (".html", ".htm", ".svg", ".xml", ".xhtml"):
+        # sandbox: HTML gerado pelos robôs roda com origem opaca (sem acesso à API/cookies)
+        headers["Content-Security-Policy"] = "sandbox allow-scripts allow-downloads allow-popups"
+    if download:
+        return FileResponse(p, headers=headers, filename=p.name)
+    return FileResponse(p, headers=headers, content_disposition_type="inline")
+
+
+@app.get("/api/view")
+def file_view(path: str, u: auth.User = Depends(current_user)):
+    """Arquivo pronto para ver dentro do sistema (planilha com fórmulas calculadas e gráficos, PDF, painel...)."""
+    from . import viewer
+    try:
+        return viewer.view(path)
+    except PermissionError as e:
+        raise HTTPException(403, str(e))
+    except FileNotFoundError:
+        raise HTTPException(404, "arquivo não encontrado")
+
+
+@app.get("/api/view/pdf")
+def file_view_pdf(path: str, page: int = 1, scale: float = 1.6, u: auth.User = Depends(current_user)):
+    from . import viewer
+    try:
+        return Response(viewer.pdf_page_png(path, page, scale), media_type="image/png",
+                        headers={"Cache-Control": "private, max-age=60"})
+    except PermissionError as e:
+        raise HTTPException(403, str(e))
+    except FileNotFoundError:
+        raise HTTPException(404, "página não encontrada")
+
+
+@app.get("/view", response_class=HTMLResponse)
+def view_page():
+    return (STATIC / "viewer.html").read_text(encoding="utf-8")
+
+
+@app.get("/lib/plotly.min.js")
+def plotly_js():
+    import plotly
+    return FileResponse(Path(plotly.__file__).parent / "package_data" / "plotly.min.js",
+                        media_type="application/javascript", headers={"Cache-Control": "max-age=86400"})
 
 
 # ---------------- admin ----------------

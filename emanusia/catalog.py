@@ -101,7 +101,7 @@ ACTIONS = [
                  F("fields", "Colunas", "keyvalue", kl="coluna", vl="caminho da tag (ex.: cliente/nome ou @id)"),
                  OUT("dados.xlsx"), SAVE("dados_xml")], out="tabela"),
     # ------------------------------------------------------------------ e-mail
-    dict(id="email_read", cat="email", tool="email_read", title="Ler e-mails",
+    dict(id="email_read", cat="email", tool="email_read", needs="Outlook do PC ou e-mail configurado em Ajustes (SMTP/IMAP)", title="Ler e-mails",
          desc="Lê a caixa de entrada (Outlook) com filtros. Os anexos escolhidos são salvos numa pasta.",
          fields=[F("subject_contains", "Assunto contém"), F("from_contains", "Remetente contém"),
                  F("since_days", "Dos últimos (dias)", "number", placeholder="7"),
@@ -111,7 +111,7 @@ ACTIONS = [
                  F("save_attachments", "Salvar todos os anexos", "bool", adv=True), F("folder", "Pasta do e-mail", adv=True,
                                                                                        placeholder="INBOX"),
                  SAVE("emails")], out="lista", out_fields=["from", "subject", "date", "text", "attachments"]),
-    dict(id="email_send", cat="email", tool="email_send", title="Enviar e-mail",
+    dict(id="email_send", cat="email", tool="email_send", needs="Outlook do PC ou e-mail configurado em Ajustes (SMTP/IMAP)", title="Enviar e-mail",
          desc="Pelo Outlook (padrão). Sempre pede autorização na hora de enviar.",
          fields=[F("to", "Para (separe por ;)", "email", required=True), F("subject", "Assunto", required=True),
                  F("body", "Mensagem", "longtext", required=True),
@@ -140,7 +140,12 @@ ACTIONS = [
          desc="Aba com cartões de indicadores e gráficos com fórmulas que se atualizam sozinhas.",
          fields=[FILE("Planilha", "dashboard.xlsx"), SOURCE, F("title", "Título", required=True), F("subtitle", "Subtítulo"),
                  KPIS, CHARTS]),
-    dict(id="excel_refresh", cat="excel", tool="excel_refresh", title="Atualizar consultas / rodar macro",
+    dict(id="excel_recalc", cat="excel", tool="excel_recalc", title="Recalcular planilha (sem Excel)",
+         desc="Calcula as fórmulas (SOMA, SOMASE, CONT.SE, SE, PROCV...) dentro do sistema e grava os resultados. "
+              "Pode salvar uma cópia só com os valores, para quem não tem Excel.",
+         fields=[FILE("Planilha", "controle.xlsx"), F("values_only", "Salvar também uma cópia só com valores", "bool"),
+                 F("output", "Cópia com valores (opcional)", "file", placeholder="controle-valores.xlsx"), SAVE("recalculo")]),
+    dict(id="excel_refresh", cat="excel", tool="excel_refresh", title="Atualizar Power Query / rodar macro", needs="Excel instalado",
          desc="Abre no Excel e atualiza Power Query e tabelas dinâmicas; pode rodar uma macro. (Windows)",
          fields=[FILE("Planilha", "base.xlsm"), F("macro", "Macro (opcional)")]),
     # ------------------------------------------------------------------ dados
@@ -538,6 +543,9 @@ STEP_OPTIONS = [
     F("comment", "Anotação", key="comment"),
 ]
 
+# o que precisa existir fora do sistema (todo o resto roda só dentro do EmanusIA)
+CAT_NEEDS = {"sap": "SAP GUI aberto neste PC (Windows)", "desktop": "o programa instalado neste PC (Windows)"}
+
 KIND = {"string": "text", "integer": "number", "number": "number", "boolean": "bool", "array": "json", "object": "json"}
 
 
@@ -547,6 +555,8 @@ def catalog(user=None) -> dict:
     actions = []
     for a in ACTIONS:
         d = dict(a)
+        if CAT_NEEDS.get(d["cat"]):
+            d.setdefault("needs", CAT_NEEDS[d["cat"]])
         if d.get("tool"):
             try:
                 t = registry.get(d["tool"])

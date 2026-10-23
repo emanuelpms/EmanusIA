@@ -219,9 +219,16 @@ async function showJob(id) {
 /* ---------- Arquivos ---------- */
 async function viewFiles() {
   const f = await api('/api/files');
-  $('#main').innerHTML = `<h2>Arquivos gerados</h2><div class="card"><table><tr><th>Arquivo</th><th>Tamanho</th><th>Modificado</th></tr>
-  ${f.map(x => `<tr><td><a href="/files/${x.path.split('/').map(encodeURIComponent).join('/')}" target="_blank" style="color:var(--acc)">${esc(x.path)}</a></td>
-  <td>${(x.size/1024).toFixed(1)} KB</td><td class="small">${new Date(x.mtime*1000).toLocaleString()}</td></tr>`).join('') || '<tr><td class="mut">Vazio.</td></tr>'}</table></div>`;
+  $('#main').innerHTML = `<h2>Arquivos gerados</h2><p class="mut small">Clique para ver dentro do sistema — planilhas (com fórmulas calculadas e gráficos), painéis, PDFs e imagens — sem abrir o Excel nem outro programa.</p>
+  <div class="card"><table><tr><th>Arquivo</th><th>Tamanho</th><th>Modificado</th><th></th></tr>
+  ${f.map(x => `<tr><td><a href="/view?path=${encodeURIComponent(x.path)}" style="color:var(--acc)">${fileIcon(x.path)} ${esc(x.path)}</a></td>
+  <td>${(x.size/1024).toFixed(1)} KB</td><td class="small">${new Date(x.mtime*1000).toLocaleString('pt-BR')}</td>
+  <td class="row"><a class="b sec" href="/view?path=${encodeURIComponent(x.path)}">👁 Ver</a>
+  <a class="b sec" href="/files/${x.path.split('/').map(encodeURIComponent).join('/')}?download=1" title="Baixar">⬇</a></td></tr>`).join('') || '<tr><td class="mut">Vazio.</td></tr>'}</table></div>`;
+}
+function fileIcon(p) {
+  const e = p.split('.').pop().toLowerCase();
+  return {xlsx: '📗', xlsm: '📗', csv: '📗', html: '📊', htm: '📊', pdf: '📕', xml: '🧾', json: '🧾', png: '🖼', jpg: '🖼', zip: '🗜'}[e] || '📄';
 }
 
 /* ---------- Admin ---------- */

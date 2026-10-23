@@ -16,7 +16,7 @@ header input,header select{width:auto}#bn{font-weight:600;font-size:15px;min-wid
 #app{flex:1;display:grid;grid-template-columns:270px 1fr 380px;min-height:0}
 aside,main{overflow:auto;min-height:0}aside#lib{background:var(--side);border-right:1px solid var(--line);padding:10px}
 aside#props{background:var(--side);border-left:1px solid var(--line);padding:14px}main#flow{padding:16px 22px 80px}
-button.b{all:unset;cursor:pointer;background:var(--acc);color:#fff;padding:7px 13px;border-radius:9px;font-size:13.5px;display:inline-flex;gap:6px;align-items:center;white-space:nowrap}
+button.b,a.b{all:unset;cursor:pointer;background:var(--acc);color:#fff;padding:7px 13px;border-radius:9px;font-size:13.5px;display:inline-flex;gap:6px;align-items:center;white-space:nowrap}
 button.b.sec{background:var(--line);color:var(--fg)}button.b.bad{background:var(--bad)}button.b.okb{background:var(--ok);color:#00201a}button.b:disabled{opacity:.45;cursor:default}
 button.l{all:unset;cursor:pointer;color:var(--acc);font-size:13px}button.l:hover{text-decoration:underline}
 input,select,textarea{background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:7px 9px;font:inherit;width:100%}
@@ -189,7 +189,7 @@ function renderLib() {
       h('summary', {title: c.desc}, h('span', {}, c.icon), c.name, h('span', {class: 'n'}, acts.length)),
       acts.map(a => h('button', {class: 'act' + (a.allowed === false ? ' no' : ''), title: a.desc || a.title,
         onclick: () => a.allowed === false ? toast('Você não tem permissão para esta ação.') : addAction(a)},
-        a.title + (a.risky ? ' ⚠️' : ''), q && a.desc ? h('span', {class: 'd'}, a.desc) : null)));
+        a.title + (a.risky ? ' ⚠️' : '') + (a.needs ? ' 🔌' : ''), q && a.desc ? h('span', {class: 'd'}, a.desc) : null)));
     box.append(d);
   }
   renderWhere();
@@ -282,7 +282,8 @@ function stepEl(s) {
     h('div', {class: 'tx'}, h('b', {}, a.title || k), s.comment ? h('span', {class: 'mut small'}, '  — ' + s.comment) : null,
       h('div', {class: 'desc'}, desc ? desc.text : ''),
       probs.map(p => h('div', {class: 'prob'}, '⚠ ' + p.text)),
-      t ? (t.ok ? h('div', {class: 'res'}, `✓ ${t.secs != null ? t.secs + 's · ' : ''}${t.preview ? t.preview.text : 'feito'}`, t.preview && t.preview.table ? tableEl(t.preview.table) : null)
+      t ? (t.ok ? h('div', {class: 'res'}, `✓ ${t.secs != null ? t.secs + 's · ' : ''}${t.preview ? t.preview.text : 'feito'}`,
+              t.preview && t.preview.file ? [' ', viewLink(t.preview.file)] : null, t.preview && t.preview.table ? tableEl(t.preview.table) : null)
             : h('div', {class: 'res e'}, '✖ ' + (t.error || 'falhou'))) : null),
     h('div', {class: 'acts'},
       h('button', {title: 'Subir', onclick: () => move(s, -1)}, '↑'), h('button', {title: 'Descer', onclick: () => move(s, 1)}, '↓'),
@@ -303,6 +304,10 @@ function stepEl(s) {
     el.append(kids);
   }
   return el;
+}
+function viewLink(file, big) {
+  return h('a', {href: '/view?path=' + encodeURIComponent(file), target: '_blank', class: big ? 'b' : '', style: big ? 'text-decoration:none' : 'color:var(--acc)',
+    onclick: e => e.stopPropagation()}, '👁 Ver ' + (big ? 'o arquivo' : ''));
 }
 function tableEl(rows) { return h('table', {class: 'pv'}, rows.map(r => h('tr', {}, r.map(c => h('td', {title: c ?? ''}, c ?? ''))))); }
 function move(s, d) {
@@ -411,6 +416,7 @@ function renderProps() {
   const s = SEL, a = actionOf(s), x = find(s);
   p.append(h('div', {class: 'mut small'}, 'Passo ' + x.path), h('h3', {}, a.title || kindOf(s)));
   if (a.desc) p.append(h('div', {class: 'help'}, a.desc));
+  if (a.needs) p.append(h('div', {class: 'banner', style: 'margin-top:8px;border:1px solid var(--line)'}, '🔌 Esta peça usa um programa de fora: ', h('b', {}, a.needs), '. Todas as outras rodam só dentro do sistema.'));
   if (a.risky) p.append(h('div', {class: 'banner warn', style: 'margin-top:8px'}, '⚠️ Esta ação pede autorização de uma pessoa na hora de rodar (a não ser que o agendamento seja sem supervisão).'));
   const fields = (a.fields || []);
   fields.filter(f => !f.adv).forEach(f => p.append(fieldEl(s, f)));
@@ -424,6 +430,7 @@ function renderProps() {
   const t = TEST[x.path];
   if (t) p.append(h('div', {class: 'out'}, h('b', {}, t.ok ? '✓ No último teste' : '✖ No último teste'),
     h('div', {}, t.ok ? (t.preview ? t.preview.text : 'feito') + (t.secs != null ? ` (${t.secs}s)` : '') : t.error),
+    t.preview && t.preview.file ? h('p', {}, viewLink(t.preview.file, true)) : null,
     t.preview && t.preview.table ? tableEl(t.preview.table) : null,
     t.shot ? h('img', {src: `/api/bots/${encodeURIComponent(BOT.id)}/shots/${t.shot}?t=${Date.now()}`, style: 'max-width:100%;margin-top:8px;border-radius:8px;border:1px solid var(--line);cursor:zoom-in', onclick: e => open(e.target.src)}) : null));
   const probs = problemsAt(x.path);

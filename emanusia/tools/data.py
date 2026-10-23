@@ -50,19 +50,22 @@ def load(source, sheet: str | None = None) -> pd.DataFrame:
     raise ValueError(f"Formato não suportado: {ext} (use xlsx, xls, csv ou json)")
 
 
-def _clean_val(v):
-    if v is None or (isinstance(v, float) and math.isnan(v)):
+def _clean_val(v, native: bool = False):
+    if v is None or (isinstance(v, float) and math.isnan(v)) or v is pd.NaT:
         return None
     if isinstance(v, pd.Timestamp):
+        if native:  # para gravar no Excel como data de verdade
+            return v.to_pydatetime().replace(tzinfo=None)
         return v.strftime("%Y-%m-%d %H:%M") if (v.hour or v.minute) else v.strftime("%Y-%m-%d")
     if hasattr(v, "item"):
         return v.item()
     return v
 
 
-def rows(df: pd.DataFrame, limit: int | None = MAX_RETURN) -> list[list]:
+def rows(df: pd.DataFrame, limit: int | None = MAX_RETURN, native: bool = False) -> list[list]:
+    """Tabela [[cabeçalho], [linha]...]. native=True mantém datas como data (para o Excel)."""
     body = df.head(limit) if limit else df
-    return [[str(c) for c in df.columns]] + [[_clean_val(v) for v in r] for r in body.itertuples(index=False)]
+    return [[str(c) for c in df.columns]] + [[_clean_val(v, native) for v in r] for r in body.itertuples(index=False)]
 
 
 def save(df: pd.DataFrame, output: str | None, sheet: str = "Dados"):
@@ -73,7 +76,7 @@ def save(df: pd.DataFrame, output: str | None, sheet: str = "Dados"):
         df.to_csv(p, index=False, encoding="utf-8-sig")
     else:
         from .excel import excel_write
-        excel_write(output, {sheet: rows(df, None)})
+        excel_write(output, {sheet: rows(df, None, native=True)})
     return output
 
 
