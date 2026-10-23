@@ -1,5 +1,7 @@
 """Logins usando o cofre de acessos (vault.py). O código do bot só conhece o NOME do acesso;
 o usuário e a senha vêm do cofre de quem está executando."""
+import re
+
 from .. import auth, vault
 from .registry import tool
 
@@ -42,9 +44,18 @@ def web_login(credential: str, url: str = ""):
         pass
     if ex.get("success_selector"):
         web._loc(ex["success_selector"]).wait_for(state="visible", timeout=web.TIMEOUT_MS)
+    else:  # confere se entrou mesmo: senha recusada aparece como aviso ou o site continua pedindo a senha
+        page.wait_for_timeout(300)
+        body = page.inner_text("body")[:5000] if page.locator("body").count() else ""
+        if LOGIN_FAILED.search(body) or web._loc(ex.get("pass_selector") or "input[type=password]").is_visible():
+            raise PermissionError(f"O site recusou o login do acesso “{credential}”. Confira o usuário e a senha em 🔑 Acessos.")
     if ex.get("session"):
         web.web_save_session(ex["session"])
     return {"logged_in": credential, "url": page.url}
+
+
+LOGIN_FAILED = re.compile(r"(senha|usu[aá]rio|login|credenciais?|password|user ?name)[^\n]{0,40}(inv[aá]lid|incorret|errad|n[aã]o confere|invalid|incorrect|wrong)"
+                          r"|(inv[aá]lid|incorret)[^\n]{0,20}(senha|usu[aá]rio|login|credenciais?)", re.I)
 
 
 @tool("web_fill_credential", "Preenche um campo com o usuário ou a senha de um acesso mapeado.",

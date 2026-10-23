@@ -73,7 +73,10 @@ TOOL_TEXT = {
     "web_select": lambda a, s: f"Escolher “{a.get('value')}” em “{target(a, s)}”",
     "web_check": lambda a, s: f"{'Marcar' if a.get('checked', True) else 'Desmarcar'} “{target(a, s)}”",
     "web_press": lambda a, s: f"Apertar a tecla {a.get('key')}",
-    "web_wait": lambda a, s: "Esperar a página carregar" if not a.get("selector") else f"Esperar aparecer “{target(a, s)}”",
+    "web_wait": lambda a, s: (f"Esperar aparecer “{target(a, s)}”" if a.get("selector") else
+                              f"Esperar aparecer o texto “{_short(a['text'], 40)}”" if a.get("text") else
+                              f"Esperar o endereço ter “{_short(a['url_contains'], 40)}”" if a.get("url_contains") else
+                              "Esperar a página carregar"),
     "web_table": lambda a, s: "Copiar a tabela da página",
     "web_extract": lambda a, s: "Copiar a lista de itens da página",
     "web_text": lambda a, s: "Ler o texto da página",
@@ -328,6 +331,7 @@ def explain_error(err: str, step: dict | None = None) -> str:
     e = str(err or "")
     what = f"“{target(step.get('args') or {}, step)}”" if step and "tool" in step else "o que precisava"
     rules = [
+        (r"O site recusou o login|Pasta não liberada para os robôs", None),  # já vêm explicados
         (r"Timeout.*(locator|waiting for|wait_for)|strict mode|not visible|element is not",
          f"Não encontrei {what} na tela. O site pode ter mudado ou demorado para carregar. "
          f"Use “Mostrar onde fica” para ensinar de novo."),
@@ -338,6 +342,7 @@ def explain_error(err: str, step: dict | None = None) -> str:
         (r"não autorizad|não autorizada", "A ação não foi autorizada, então o robô parou antes de fazê-la."),
         (r"Outlook só funciona no Windows", "O e-mail pelo Outlook só funciona no computador Windows com o Outlook aberto."),
         (r"só (está disponível|funciona) no Windows|só no Windows", "Essa ação só funciona no computador Windows da empresa."),
+        (r"No such file or directory: '(?:[^']*[/\\])?([^'/\\]+)'", r"Não achei o arquivo “\1”. Confira o nome e se ele está na pasta do robô."),
         (r"No such file|FileNotFound|não existe\b.*arquivo|Nenhuma planilha", "Não achei o arquivo. Confira o nome e se ele está na pasta do robô."),
         (r"Coluna '([^']+)' não existe", r"A planilha não tem a coluna “\1”. Confira o nome da coluna."),
         (r"Variável de ambiente (\w+) não definida|Defina a variável de ambiente (\w+)",
@@ -411,6 +416,12 @@ def preview(v, rows: int = 6, cols: int = 8) -> dict:
     if isinstance(v, dict) and isinstance(v.get("findings"), list):
         return {"text": f"{len(v['findings'])} ponto(s) identificado(s), {len(v.get('suggestions') or [])} sugestão(ões): "
                         + cut((v["findings"] or [""])[0], 120)}
+    if isinstance(v, dict) and "sent_to" in v:
+        return {"text": "Enviado para " + ", ".join(map(str, v["sent_to"])) + f" ({str(v.get('provider', '')).upper()})"}
+    if isinstance(v, dict) and "logged_in" in v:
+        return {"text": f"Entrou com o acesso “{v['logged_in']}”"}
+    if isinstance(v, dict) and "title" in v and "url" in v and "tab" in v:
+        return {"text": f"Página aberta: “{cut(v['title'] or v['url'], 80)}”"}
     if isinstance(v, dict):
         saved = v.get("output") or v.get("path")
         if isinstance(saved, str) and saved:
@@ -423,6 +434,6 @@ def preview(v, rows: int = 6, cols: int = 8) -> dict:
         return {"text": "; ".join(f"{k}: {cut(x, 50)}" for k, x in list(v.items())[:8])}
     if isinstance(v, bool):
         return {"text": "Sim" if v else "Não"}
-    if v is None or v == "":
+    if v is None or v == "" or v == "ok":
         return {"text": "Feito"}
     return {"text": cut(v, 200)}

@@ -293,7 +293,7 @@ def test_builder_bot_rehearsal_reports_each_step(client):
         time.sleep(0.1)
     assert j["status"] == "done" and j["result"]["ok"], j
     done = [e for e in j["events"] if e["kind"] == "step_done"]
-    assert [e["path"] for e in done] == ["1", "3.1", "3.1", "4"]
+    assert [e["path"] for e in done] == ["1", "2", "3.1", "3.2", "3.1", "3.2", "4"]  # "guardar" também aparece
     assert done[0]["preview"]["text"].startswith("Lista com 2") and done[-1]["secs"] >= 0
     assert (config.workspace() / "saida.xlsx").exists()
     assert client.get("/builder").status_code == 200
@@ -445,3 +445,20 @@ def test_full_process_failure_warns_responsible(monkeypatch):
     with pytest.raises(Exception):
         run_steps(code, confirm=lambda n, a: True)
     assert sent and sent[0][1].startswith("⚠️") and "nao-existe" in sent[0][2]
+
+
+def test_login_refused_is_detected_and_error_is_explained_in_catch(headless):
+    from emanusia import vault
+    page = config.workspace() / "login.html"
+    page.write_text("<meta charset=utf-8><form onsubmit=\"event.preventDefault();document.body.innerHTML="
+                    "'<p>Usuário ou senha inválidos</p>'\"><input type=text><input type=password><button>Entrar</button></form>",
+                    encoding="utf-8")
+    vault.set_credential("local", "portal", "ana", "errada", url=page.as_uri())
+    code = {"steps": [{"try": [{"tool": "web_login", "args": {"credential": "portal"}}],
+                       "catch": [{"tool": "file_write", "args": {"path": "aviso.txt", "content": "{{erro}}"}}]}]}
+    try:
+        run_steps(code)
+    finally:
+        registry.call("web_close")
+    aviso = (config.workspace() / "aviso.txt").read_text(encoding="utf-8")
+    assert aviso.startswith("O site recusou o login do acesso “portal”") and "Acessos" in aviso

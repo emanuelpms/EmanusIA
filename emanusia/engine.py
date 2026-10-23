@@ -581,13 +581,17 @@ class Runner:
                 raise
             except Exception as e:
                 self.failed_at = None  # erro tratado pelo catch: não interrompe
-                ctx["erro"] = f"{type(e).__name__}: {e}"
+                from . import plain
+                ctx["erro_tecnico"] = f"{type(e).__name__}: {e}"
+                ctx["erro"] = plain.explain_error(ctx["erro_tecnico"])  # em português, para avisos e e-mails
                 self.emit("log", text=f"erro tratado: {e}"[:120])
                 self._steps(s.get("catch") or [], ctx, wf_name, seg="catch")
             return
         if "set" in s:
             for k, v in s["set"].items():
                 ctx[k] = render(v, ctx, exprs=True)
+            if self.on_step:  # o ensaio/construtor mostra o que foi guardado
+                self.on_step(self.path, s, True, {k: ctx[k] for k in s["set"]})
             return
         if "call" in s:
             from .tools.workflow import load_workflow
@@ -621,7 +625,10 @@ class Runner:
                 ctx[s["save_as"]] = res["outputs"]
             return
         if "log" in s:
-            self.emit("log", text=str(render(s["log"], ctx))[:200])
+            text = str(render(s["log"], ctx))[:200]
+            self.emit("log", text=text)
+            if self.on_step:
+                self.on_step(self.path, s, True, text)
             return
         if "sleep" in s:
             time.sleep(min(float(s["sleep"]), 300))

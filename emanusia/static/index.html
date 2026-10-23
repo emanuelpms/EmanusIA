@@ -204,14 +204,16 @@ async function togSched(id, en) { await api(`/api/schedules/${id}/toggle`, 'POST
 async function delSched(id) { await api('/api/schedules/' + id, 'DELETE'); viewSched(); }
 
 /* ---------- Tarefas ---------- */
+const JOB_KIND = {bot: '🤖 Robô', rehearsal: '🎭 Teste/ensaio', workflow: '⚙️ Automação', teach: '🎬 Ensinar', fix: '👉 Consertar', record: '🔴 Gravação'};
+const JOB_STATUS = {done: 'concluída', error: 'com erro', running: 'trabalhando', queued: 'na fila', waiting_approval: 'aguardando autorização'};
 async function viewJobs() {
   const js = await api('/api/jobs');
   $('#main').innerHTML = `<h2>Tarefas</h2><div class="card"><table><tr><th>Quando</th><th>Tipo</th><th>Título</th><th>Usuário</th><th>Status</th></tr>
-  ${js.map(j => `<tr style="cursor:pointer" onclick="showJob('${j.id}')"><td class="small">${new Date(j.created*1000).toLocaleTimeString()}</td><td>${esc(j.kind)}</td><td>${esc(j.title)}</td><td>${esc(j.user)}</td><td><span class="tag ${j.status}">${esc(j.status)}</span></td></tr>`).join('') || '<tr><td class="mut">Sem tarefas nesta sessão.</td></tr>'}</table></div>`;
+  ${js.map(j => `<tr style="cursor:pointer" onclick="showJob('${j.id}')"><td class="small">${new Date(j.created*1000).toLocaleString('pt-BR')}</td><td>${esc(JOB_KIND[j.kind] || j.kind)}</td><td>${esc(j.title)}</td><td>${esc(j.user)}</td><td><span class="tag ${j.status}">${esc(JOB_STATUS[j.status] || j.status)}</span></td></tr>`).join('') || '<tr><td class="mut">Sem tarefas nesta sessão.</td></tr>'}</table></div>`;
 }
 async function showJob(id) {
   const j = await api('/api/jobs/' + id);
-  modal(`<h2>${esc(j.title)}</h2><span class="tag ${j.status}">${esc(j.status)}</span>
+  modal(`<h2>${esc(j.title)}</h2><span class="tag ${j.status}">${esc(JOB_STATUS[j.status] || j.status)}</span>
   <label>Passos</label><pre>${esc(j.events.map(e => e.kind === 'tool_call' ? '→ ' + e.name + ' ' + JSON.stringify(e.args) : e.kind === 'tool_result' ? '   ← ' + JSON.stringify(e.result).slice(0, 300) : e.kind + ' ' + JSON.stringify(e)).join('\n') || '—')}</pre>
   <label>Resultado</label><pre>${esc(typeof j.result === 'string' ? j.result : JSON.stringify(j.result, null, 2))}</pre>`);
 }

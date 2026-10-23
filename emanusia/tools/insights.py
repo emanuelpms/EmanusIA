@@ -129,7 +129,7 @@ def data_insights(source, value: str, date_column: str = "", dimensions: list | 
                         summary["variacao_sem_fora_do_padrao"] = round(adj, 4)
                         var = adj  # a decisão usa o número "limpo"
                 if var <= -0.10:
-                    S.append(f"Investigar a queda de {_p(var)} em {lbl(last_p)}" + (" — veja abaixo onde mais caiu." if dims else "."))
+                    S.append(f"Investigar a queda de {_p(var)} em {lbl(last_p)}" + (" — as maiores quedas estão nos pontos identificados acima." if dims else "."))
                 elif var >= 0.10:
                     S.append(f"Entender o que puxou a alta de {_p(var)} em {lbl(last_p)} para repetir nos próximos períodos.")
             best, worst = per.idxmax(), per.idxmin()
@@ -166,7 +166,7 @@ def data_insights(source, value: str, date_column: str = "", dimensions: list | 
             if len(delta) and delta.iloc[0] < 0:
                 k = delta.index[0]
                 F.append(f"Maior queda por {d} no último mês: {k} ({f(delta.iloc[0])}).")
-                S.append(f"Conversar com o responsável por {k}: é quem mais caiu em {d} ({f(delta.iloc[0])}).")
+                S.append(f"Entender a queda de {k} ({d}): foi a maior do último mês ({f(delta.iloc[0])}).")
             if len(delta) and delta.iloc[-1] > 0:
                 F.append(f"Maior crescimento por {d} no último mês: {delta.index[-1]} (+{f(delta.iloc[-1])}).")
         if len(g) > top:
